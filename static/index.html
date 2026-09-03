@@ -1,0 +1,159 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>SafeSite AI — Gate Check-In & Safety Kiosk</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="/static/css/style.css">
+</head>
+<body>
+    <!-- Top Navigation Header -->
+    <header class="navbar">
+        <div class="brand">
+            <span class="logo-icon">🏗️</span>
+            <div>
+                <h1 class="brand-name">SafeSite AI</h1>
+                <p class="brand-sub">Gate Check-In & Upper-Body PPE Kiosk</p>
+            </div>
+        </div>
+
+        <!-- System Controls Header -->
+        <div class="nav-controls">
+            <div class="uptime-badge">⏱️ Uptime: <span id="val-uptime">0s</span></div>
+            <button class="btn btn-halt" id="btn-halt" onclick="toggleHalt()">⏹ HALT / STOP SYSTEM</button>
+            <button class="btn btn-pamphlet" id="btn-pamphlet" onclick="togglePamphletMode()">🪧 Onboarding Pamphlet</button>
+        </div>
+    </header>
+
+    <!-- Main Workspace -->
+    <main class="container">
+        <!-- Left Column: Live Scanner Feed & Gate Operator Controls -->
+        <div class="video-card">
+            <div class="card-header">
+                <div class="live-indicator">
+                    <span class="live-dot" id="live-dot">● LIVE SCANNER</span>
+                </div>
+                <span class="worker-badge" id="worker-title">Worker #1 Gate Check-In</span>
+            </div>
+            
+            <div class="video-wrapper" id="video-wrapper">
+                <img src="/video_feed" id="video-stream" alt="SafeSite AI Gate Camera Stream">
+                <div class="scan-line" id="scan-line"></div>
+                
+                <!-- Visual Onboarding Pamphlet Mode Overlay (Only Pops Up After Scan Decision Locked) -->
+                <div class="pamphlet-overlay" id="pamphlet-overlay">
+                    <div class="pamphlet-card">
+                        <div class="pamphlet-badge">REMEDIATION GUIDE</div>
+                        <h2>🪧 MANDATORY SITE GEAR PAMPHLET</h2>
+                        <p class="pamphlet-sub">Visual Instructions for On-Site Laborers</p>
+                        
+                        <div class="pamphlet-grid">
+                            <div class="pamphlet-item">
+                                <div class="p-icon">🪖</div>
+                                <div class="p-label">1. Safety Helmet</div>
+                                <div class="p-status">🤖 AI SCANNED</div>
+                            </div>
+                            <div class="pamphlet-item">
+                                <div class="p-icon">🦺</div>
+                                <div class="p-label">2. Reflective Vest</div>
+                                <div class="p-status">🤖 AI SCANNED</div>
+                            </div>
+                            <div class="pamphlet-item">
+                                <div class="p-icon">🥾</div>
+                                <div class="p-label">3. Safety Boots</div>
+                                <div class="p-status amber">👁️ MANUAL CHECK</div>
+                            </div>
+                        </div>
+
+                        <div class="pamphlet-footer">
+                            <span>📦 Gear Missing? Collect from <strong>SPARE PPE BIN A</strong> at gate!</span>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Halted Overlay -->
+                <div class="halted-overlay" id="halted-overlay">
+                    <div class="halted-card">
+                        <span class="halted-icon">⏹</span>
+                        <h2>SYSTEM HALTED</h2>
+                        <p>Webcam hardware powered OFF and processing paused.</p>
+                        <button class="btn btn-primary" style="margin-top: 15px;" onclick="toggleHalt()">▶ RESUME SYSTEM</button>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Status Banner Indicator -->
+            <div class="status-banner" id="status-banner">
+                <div class="status-indicator" id="status-dot"></div>
+                <div class="status-text" id="status-text">INITIALIZING GATE KIOSK...</div>
+            </div>
+
+            <!-- Gate Operator Control Buttons -->
+            <div class="kiosk-actions">
+                <button class="btn btn-action btn-rescan" onclick="rescanWorker()">🔁 Re-Scan Worker (Equipped Gear)</button>
+                <button class="btn btn-action btn-next" onclick="nextWorker()">👤 Next Worker in Line ➔</button>
+            </div>
+
+            <!-- Audio Script Display Banner -->
+            <div class="script-box">
+                <span class="script-icon">📢</span>
+                <span class="script-text" id="script-text">Sequential Voice Loop: 🇮🇳 Hindi ➔ 🌾 Bhojpuri ➔ 🚩 Maithili</span>
+            </div>
+        </div>
+
+        <!-- Right Column: Contractor Control Panel & Daily Audit Stats -->
+        <div class="control-card">
+            <h2 class="section-title">📊 Contractor Dashboard</h2>
+            
+            <div class="stats-grid">
+                <div class="stat-box">
+                    <div class="stat-num" id="stat-scans">0</div>
+                    <div class="stat-lbl">Total Gate Scans</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-num green" id="stat-cleared">0</div>
+                    <div class="stat-lbl">Shift Cleared</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-num amber" id="stat-spare">0</div>
+                    <div class="stat-lbl">Spare PPE Issued</div>
+                </div>
+                <div class="stat-box">
+                    <div class="stat-num red" id="stat-breaches">0</div>
+                    <div class="stat-lbl">Flagged Violations</div>
+                </div>
+            </div>
+
+            <!-- Zero-Wasted-Day Workflow Info -->
+            <div class="info-box">
+                <div class="info-title">📦 Upper-Body AI Scan Workflow</div>
+                <p>AI scans Upper-Body PPE (Helmet & Vest). Requires workers to stand steady for 2 seconds before locking output. Missing gear is directed to Spare Bin A.</p>
+            </div>
+
+            <!-- Phase 2 Future Upgrades (Simplified Language) -->
+            <div class="upgrade-box">
+                <div class="upgrade-title">💡 Potential Upgrades (Phase 2)</div>
+                <ul class="upgrade-list">
+                    <li>• <strong>Connect Extra Site Cameras:</strong> Stream live feeds from scaffolding or crane areas into this system.</li>
+                    <li>• <strong>Automated WhatsApp / SMS Alerts:</strong> Send instant photo alerts of safety violations directly to contractor phones.</li>
+                </ul>
+            </div>
+
+            <!-- Report Button -->
+            <div class="report-section">
+                <a href="/api/generate_report" target="_blank" class="btn btn-primary btn-block">
+                    📄 Generate 1-Click PDF Audit Report
+                </a>
+            </div>
+        </div>
+    </main>
+
+    <!-- Hidden Audio Player -->
+    <audio id="audio-player"></audio>
+
+    <script src="/static/js/app.js"></script>
+</body>
+</html>

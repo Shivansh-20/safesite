@@ -1,0 +1,511 @@
+:root {
+    --bg-dark: #08080d;
+    --card-bg: rgba(18, 18, 30, 0.75);
+    --card-border: rgba(255, 255, 255, 0.12);
+    --primary: #00f0ff;
+    --secondary: #a855f7;
+    --green: #10b981;
+    --amber: #f59e0b;
+    --red: #ef4444;
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+}
+
+* {
+    margin: 0;
+    padding: 0;
+    box-sizing: border-box;
+    font-family: 'Outfit', sans-serif;
+}
+
+body {
+    background-color: var(--bg-dark);
+    background-image: 
+        radial-gradient(at 0% 0%, rgba(0, 240, 255, 0.12) 0px, transparent 50%),
+        radial-gradient(at 100% 100%, rgba(168, 85, 247, 0.12) 0px, transparent 50%);
+    color: var(--text-main);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Navbar */
+.navbar {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 16px 40px;
+    background: rgba(12, 12, 22, 0.9);
+    backdrop-filter: blur(25px);
+    border-bottom: 1px solid var(--card-border);
+    box-shadow: 0 4px 20px rgba(0, 0, 0, 0.5);
+}
+
+.brand {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.logo-icon {
+    font-size: 2.4rem;
+}
+
+.brand-name {
+    font-size: 1.7rem;
+    font-weight: 800;
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    -webkit-background-clip: text;
+    -webkit-text-fill-color: transparent;
+    letter-spacing: 0.5px;
+}
+
+.brand-sub {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+}
+
+.nav-controls {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+}
+
+.uptime-badge {
+    background: rgba(0, 240, 255, 0.08);
+    border: 1px solid rgba(0, 240, 255, 0.25);
+    padding: 8px 16px;
+    border-radius: 20px;
+    font-size: 0.88rem;
+    font-weight: 700;
+    color: var(--primary);
+}
+
+/* Layout Container */
+.container {
+    display: grid;
+    grid-template-columns: 1.8fr 1fr;
+    gap: 28px;
+    padding: 25px 40px;
+    flex: 1;
+}
+
+.video-card, .control-card {
+    background: var(--card-bg);
+    border: 1px solid var(--card-border);
+    backdrop-filter: blur(25px);
+    border-radius: 24px;
+    padding: 24px;
+    box-shadow: 0 15px 45px rgba(0, 0, 0, 0.5);
+}
+
+.card-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    margin-bottom: 14px;
+}
+
+.live-dot {
+    color: var(--red);
+    font-size: 0.88rem;
+    font-weight: 800;
+    letter-spacing: 1px;
+    animation: pulse 1.5s infinite;
+}
+
+@keyframes pulse {
+    0%, 100% { opacity: 1; }
+    50% { opacity: 0.3; }
+}
+
+.worker-badge {
+    font-size: 0.95rem;
+    font-weight: 800;
+    color: var(--primary);
+    background: rgba(0, 240, 255, 0.12);
+    border: 1px solid rgba(0, 240, 255, 0.3);
+    padding: 6px 16px;
+    border-radius: 20px;
+    box-shadow: 0 0 10px rgba(0, 240, 255, 0.15);
+}
+
+/* Video Wrapper */
+.video-wrapper {
+    position: relative;
+    width: 100%;
+    border-radius: 18px;
+    overflow: hidden;
+    border: 2px solid rgba(255, 255, 255, 0.15);
+    background: #000;
+    aspect-ratio: 4 / 3;
+    box-shadow: 0 8px 30px rgba(0, 0, 0, 0.6);
+}
+
+#video-stream {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+    display: block;
+}
+
+/* Scanner Line Animation */
+.scan-line {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 4px;
+    background: linear-gradient(90deg, transparent, var(--primary), transparent);
+    box-shadow: 0 0 15px var(--primary);
+    animation: scan 3s linear infinite;
+    pointer-events: none;
+}
+
+@keyframes scan {
+    0% { top: 0; }
+    50% { top: 100%; }
+    100% { top: 0; }
+}
+
+/* Pamphlet Overlay (Only pops up AFTER missing gear decision is locked) */
+.pamphlet-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(8, 8, 14, 0.95);
+    backdrop-filter: blur(15px);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    z-index: 40;
+}
+
+.pamphlet-overlay.visible {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.pamphlet-card {
+    text-align: center;
+    padding: 26px;
+    max-width: 520px;
+}
+
+.pamphlet-badge {
+    display: inline-block;
+    font-size: 0.75rem;
+    font-weight: 800;
+    letter-spacing: 1.5px;
+    color: var(--amber);
+    background: rgba(245, 158, 11, 0.15);
+    border: 1px solid var(--amber);
+    padding: 4px 12px;
+    border-radius: 12px;
+    margin-bottom: 10px;
+}
+
+.pamphlet-card h2 {
+    font-size: 1.35rem;
+    color: var(--primary);
+    margin-bottom: 4px;
+    font-weight: 800;
+}
+
+.pamphlet-sub {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    margin-bottom: 20px;
+}
+
+.pamphlet-grid {
+    display: flex;
+    justify-content: space-around;
+    gap: 14px;
+    margin-bottom: 20px;
+}
+
+.pamphlet-item {
+    background: rgba(255, 255, 255, 0.05);
+    border: 1px solid var(--card-border);
+    padding: 14px;
+    border-radius: 16px;
+    flex: 1;
+}
+
+.p-icon {
+    font-size: 2.2rem;
+    margin-bottom: 6px;
+}
+
+.p-label {
+    font-size: 0.8rem;
+    font-weight: 600;
+    margin-bottom: 4px;
+}
+
+.p-status {
+    font-size: 0.75rem;
+    color: var(--green);
+    font-weight: 800;
+}
+
+.p-status.amber {
+    color: var(--amber);
+}
+
+.pamphlet-footer {
+    font-size: 0.88rem;
+    color: var(--text-main);
+    background: rgba(0, 240, 255, 0.08);
+    border: 1px solid rgba(0, 240, 255, 0.25);
+    padding: 10px 16px;
+    border-radius: 12px;
+}
+
+/* Halted Overlay */
+.halted-overlay {
+    position: absolute;
+    top: 0;
+    left: 0;
+    width: 100%;
+    height: 100%;
+    background: rgba(8, 8, 14, 0.96);
+    display: flex;
+    justify-content: center;
+    align-items: center;
+    opacity: 0;
+    pointer-events: none;
+    transition: opacity 0.3s ease;
+    z-index: 50;
+}
+
+.halted-overlay.visible {
+    opacity: 1;
+    pointer-events: all;
+}
+
+.halted-card {
+    text-align: center;
+}
+
+.halted-icon {
+    font-size: 3.2rem;
+    color: var(--red);
+    display: block;
+    margin-bottom: 10px;
+}
+
+.halted-card h2 {
+    font-size: 1.6rem;
+    color: var(--primary);
+    margin-bottom: 6px;
+    font-weight: 800;
+}
+
+.halted-card p {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+
+/* Status Banner */
+.status-banner {
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    background: rgba(0, 0, 0, 0.65);
+    border: 1px solid var(--card-border);
+    padding: 16px 20px;
+    border-radius: 16px;
+    margin-top: 15px;
+}
+
+.status-indicator {
+    width: 14px;
+    height: 14px;
+    border-radius: 50%;
+    background-color: var(--green);
+    box-shadow: 0 0 12px var(--green);
+}
+
+.status-text {
+    font-size: 1.05rem;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+}
+
+/* Kiosk Gate Action Buttons */
+.kiosk-actions {
+    display: flex;
+    gap: 14px;
+    margin-top: 15px;
+}
+
+.btn-action {
+    flex: 1;
+    padding: 15px;
+    font-size: 0.95rem;
+    font-weight: 800;
+    border-radius: 14px;
+    border: none;
+    cursor: pointer;
+    transition: all 0.3s ease;
+}
+
+.btn-rescan {
+    background: rgba(245, 158, 11, 0.18);
+    border: 1px solid var(--amber);
+    color: #fbbf24;
+}
+
+.btn-rescan:hover {
+    background: var(--amber);
+    color: #000;
+    box-shadow: 0 0 18px rgba(245, 158, 11, 0.5);
+}
+
+.btn-next {
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    color: #000;
+}
+
+.btn-next:hover {
+    box-shadow: 0 0 22px rgba(0, 240, 255, 0.5);
+    transform: translateY(-2px);
+}
+
+.script-box {
+    margin-top: 12px;
+    background: rgba(0, 240, 255, 0.05);
+    border: 1px solid rgba(0, 240, 255, 0.2);
+    padding: 10px 18px;
+    border-radius: 12px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.script-text {
+    font-size: 0.88rem;
+    color: #e2e8f0;
+}
+
+/* Controls Column */
+.section-title {
+    font-size: 1.3rem;
+    font-weight: 800;
+    margin-bottom: 16px;
+    color: var(--primary);
+}
+
+.stats-grid {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    margin-bottom: 20px;
+}
+
+.stat-box {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid var(--card-border);
+    padding: 16px;
+    border-radius: 16px;
+    text-align: center;
+}
+
+.stat-num {
+    font-size: 1.9rem;
+    font-weight: 800;
+    color: var(--primary);
+}
+
+.stat-num.green { color: var(--green); }
+.stat-num.amber { color: var(--amber); }
+.stat-num.red { color: var(--red); }
+
+.stat-lbl {
+    font-size: 0.75rem;
+    color: var(--text-muted);
+    margin-top: 4px;
+    font-weight: 600;
+}
+
+.info-box, .upgrade-box {
+    background: rgba(255, 255, 255, 0.025);
+    border: 1px solid var(--card-border);
+    padding: 16px;
+    border-radius: 16px;
+    margin-bottom: 15px;
+}
+
+.info-title, .upgrade-title {
+    font-size: 0.95rem;
+    font-weight: 700;
+    margin-bottom: 6px;
+    color: var(--text-main);
+}
+
+.info-box p {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    line-height: 1.4;
+}
+
+.upgrade-list {
+    font-size: 0.82rem;
+    color: var(--text-muted);
+    list-style: none;
+    line-height: 1.6;
+}
+
+.btn {
+    padding: 10px 16px;
+    border-radius: 12px;
+    font-size: 0.85rem;
+    font-weight: 600;
+    cursor: pointer;
+    border: none;
+    transition: all 0.3s ease;
+    text-decoration: none;
+    display: inline-block;
+    text-align: center;
+}
+
+.btn-halt {
+    background: rgba(239, 68, 68, 0.15);
+    border: 1px solid var(--red);
+    color: var(--red);
+    font-weight: 700;
+}
+
+.btn-halt.active {
+    background: var(--red);
+    color: #fff;
+    box-shadow: 0 0 15px rgba(239, 68, 68, 0.5);
+}
+
+.btn-pamphlet {
+    background: rgba(255, 255, 255, 0.04);
+    border: 1px solid var(--card-border);
+    color: var(--text-main);
+}
+
+.btn-pamphlet.active {
+    border-color: var(--primary);
+    color: var(--primary);
+}
+
+.btn-primary {
+    background: linear-gradient(90deg, var(--primary), var(--secondary));
+    color: #000;
+    font-weight: 800;
+}
+
+.btn-block {
+    width: 100%;
+}
