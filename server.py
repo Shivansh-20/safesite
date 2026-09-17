@@ -185,11 +185,15 @@ def video_feed():
 
 @app.post("/api/halt_toggle")
 def halt_toggle():
-    """Toggles system halt state. Releases webcam hardware when halted."""
+    """Toggles system halt state. Releases webcam hardware when halted, reopens instantly on resume."""
+    global LAST_CAMERA_ATTEMPT
     is_halted = vision_engine.toggle_halt()
     update_active_uptime(is_halted)
     if is_halted:
         release_camera()
+    else:
+        LAST_CAMERA_ATTEMPT = 0
+        get_camera()
     return {
         "is_halted": is_halted,
         "message": "System Halted & Camera Off" if is_halted else "System Resumed"

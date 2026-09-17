@@ -6,7 +6,12 @@ let audioPlayer = document.getElementById('audio-player');
 let isPamphletOpen = false;
 let videoStream = document.getElementById('video-stream');
 
+let isHaltToggling = false;
+
 function toggleHalt() {
+    if (isHaltToggling) return;
+    isHaltToggling = true;
+
     fetch('/api/halt_toggle', { method: 'POST' })
         .then(res => res.json())
         .then(data => {
@@ -25,9 +30,16 @@ function toggleHalt() {
                 btn.innerText = "⏹ HALT / STOP SYSTEM";
                 btn.classList.remove('active');
                 haltedOverlay.classList.remove('visible');
-                videoStream.src = "/video_feed?t=" + new Date().getTime(); // Re-enable camera stream
+                // Reconnect video stream smoothly
+                setTimeout(() => {
+                    videoStream.src = "/video_feed?t=" + new Date().getTime();
+                }, 150);
             }
             fetchStatus();
+        })
+        .catch(err => console.error("Halt toggle error:", err))
+        .finally(() => {
+            setTimeout(() => { isHaltToggling = false; }, 500);
         });
 }
 
@@ -264,6 +276,7 @@ function forceMissing() {
 // Press 'H'        -> Halt / Resume system
 function handleHotkey(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+    if (e.repeat) return; // Prevent rapid-fire toggling when key is held down
 
     const key = e.key ? e.key.toLowerCase() : '';
     console.log("SafeSite Key Captured:", key);
@@ -276,7 +289,8 @@ function handleHotkey(e) {
         rescanWorker();
     } else if (key === 'n') {
         nextWorker();
-    } else if (key === 'h') {
+    } else if (key === 'h' || key === ' ') {
+        e.preventDefault();
         toggleHalt();
     }
 }
