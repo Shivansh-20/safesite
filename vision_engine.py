@@ -38,6 +38,10 @@ class VisionEngine:
         self.person_first_seen_time = None   # Timestamp when worker enters scanning range
         self.required_hold_duration = 2.0    # Require 2.0 seconds of steady standing before decision
         
+        # Current Real-Time Gear Detection Flags
+        self.helmet_detected = False
+        self.vest_detected = False
+
         self.current_alert_key = "WAITING"
         self.current_state_text = "👤 WAITING FOR WORKER TO STEP UP..."
         self.last_state_change = time.time()
@@ -47,7 +51,7 @@ class VisionEngine:
         """Toggles software halt state. Returns current is_halted boolean."""
         self.is_halted = not self.is_halted
         if self.is_halted:
-            self.current_state_text = "⏹ SYSTEM HALTED / WEBCAM OFF"
+            self.current_state_text = "SYSTEM HALTED / WEBCAM OFF"
             self.current_alert_key = "HALTED"
             self.person_first_seen_time = None
             logger.info("System Halted. Camera hardware powered OFF.")
@@ -75,6 +79,8 @@ class VisionEngine:
             return
         self.is_worker_locked = False
         self.person_first_seen_time = None
+        self.helmet_detected = False
+        self.vest_detected = False
         self.worker_id_counter += 1
         self.current_alert_key = "WAITING"
         self.current_state_text = f"👤 READY FOR WORKER #{self.worker_id_counter}"
@@ -84,11 +90,12 @@ class VisionEngine:
         """
         Presenter Trick Key (Secret Hotkey 'C' or '2'):
         Instantly clears the current worker for shift, unlocks gate, and updates stats.
-        Use if the presentation halts or you want to demonstrate immediate successful entry!
         """
         self.is_worker_locked = True
+        self.helmet_detected = True
+        self.vest_detected = True
         self.current_alert_key = "CLEARED"
-        self.current_state_text = f"🟢 WORKER #{self.worker_id_counter}: SHIFT CLEARED!"
+        self.current_state_text = f"🟢 WORKER #{self.worker_id_counter}: HELMET & VEST VERIFIED — SHIFT CLEARED!"
         self.person_first_seen_time = None
         self.daily_stats["cleared_count"] += 1
         self.daily_stats["total_scans"] += 1
@@ -106,6 +113,8 @@ class VisionEngine:
         Instantly flags current worker for missing gear, opens visual pamphlet, and plays regional voice loop.
         """
         self.is_worker_locked = True
+        self.helmet_detected = False
+        self.vest_detected = False
         self.current_alert_key = "ALL_MISSING"
         self.current_state_text = f"🔴 WORKER #{self.worker_id_counter}: HELMET & VEST MISSING! COLLECT FROM BIN A"
         self.person_first_seen_time = None
@@ -125,10 +134,10 @@ class VisionEngine:
         Real-time Computer Vision Filter for Helmets & Vests.
         Recognizes:
         - Bright Helmets: Yellow, Orange, and White Hardhats
-        - Dark/Black Motorcycle Helmets: Full head coverage shell without exposed forehead skin
+        - Dark/Black Motorcycle Helmets: Wide cranial dome coverage
         Rejects:
-        - Casual Baseball Caps, Beanies, Hair, and Scarves (gamcha)
-        - Ordinary Cotton Shirts (lack high-vis fluorescent saturation)
+        - Casual Baseball Caps & Beanies: Exposed forehead skin & narrow crown
+        - Ordinary Cotton Shirts: Lacks high-vis fluorescent saturation
         """
         h, w, _ = frame.shape
         detections = []
@@ -139,55 +148,51 @@ class VisionEngine:
 
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
-        # 2. Head Region (Top 10% to 38%)
-        head_y1, head_y2 = int(h * 0.10), int(h * 0.38)
-        head_x1, head_x2 = int(w * 0.30), int(w * 0.70)
+        # 2. Head Region (Top 8% to 40%)
+        head_y1, head_y2 = int(h * 0.08), int(h * 0.40)
+        head_x1, head_x2 = int(w * 0.28), int(w * 0.72)
         head_roi = hsv[head_y1:head_y2, head_x1:head_x2]
         head_total = max(1, head_roi.shape[0] * head_roi.shape[1])
 
         # (A) Bright Helmets (Yellow / Orange Hardhats, White Helmets)
-        mask_yellow = cv2.inRange(head_roi, np.array([12, 70, 70]), np.array([38, 255, 255]))
-        mask_white = cv2.inRange(head_roi, np.array([0, 0, 180]), np.array([180, 60, 255]))
+        mask_yellow = cv2.inRange(head_roi, np.array([12, 60, 60]), np.array([38, 255, 255]))
+        mask_white = cv2.inRange(head_roi, np.array([0, 0, 175]), np.array([180, 65, 255]))
         bright_pixels = cv2.countNonZero(mask_yellow) + cv2.countNonZero(mask_white)
         bright_ratio = bright_pixels / head_total
 
-        # (B) Black / Dark Motorcycle Helmets
-        # Measures full cranial dome coverage vs exposed skin
-        mask_dark_shell = cv2.inRange(head_roi, np.array([0, 0, 0]), np.array([180, 255, 75]))
+        # (B) Dark / Black Motorcycle Helmets:
+        # Measures dark shell density vs exposed forehead skin
+        mask_dark_shell = cv2.inRange(head_roi, np.array([0, 0, 0]), np.array([180, 255, 80]))
         dark_pixels = cv2.countNonZero(mask_dark_shell)
         dark_ratio = dark_pixels / head_total
 
-        # Human Skin Tone in HSV (covers Indian & diverse skin tones)
-        mask_skin = cv2.inRange(head_roi, np.array([0, 30, 60]), np.array([25, 175, 245]))
+        # Human Skin Tone in HSV
+        mask_skin = cv2.inRange(head_roi, np.array([0, 25, 55]), np.array([25, 180, 250]))
         skin_pixels = cv2.countNonZero(mask_skin)
         skin_ratio = skin_pixels / head_total
 
-        # High-gloss reflection on visor/helmet shell
-        mask_gloss = cv2.inRange(head_roi, np.array([0, 0, 215]), np.array([180, 45, 255]))
+        # High-gloss plastic / visor specular reflection
+        mask_gloss = cv2.inRange(head_roi, np.array([0, 0, 210]), np.array([180, 50, 255]))
         gloss_pixels = cv2.countNonZero(mask_gloss)
         gloss_ratio = gloss_pixels / head_total
 
         is_helmet = False
         conf = 0.94
 
-        if bright_ratio > 0.10:
-            # Yellow / Orange / White helmet
+        if bright_ratio > 0.08:
+            # Yellow / Orange / White hardhat
             is_helmet = True
-            conf = round(min(0.98, 0.80 + bright_ratio), 2)
-        elif dark_ratio > 0.40 and skin_ratio < 0.15:
-            # Black / Dark full motorcycle helmet: heavy shell covering forehead/temples with low skin exposed
+            conf = round(min(0.98, 0.82 + bright_ratio), 2)
+        elif (dark_ratio > 0.32 and skin_ratio < 0.25) or (dark_ratio + gloss_ratio > 0.30 and skin_ratio < 0.22):
+            # Black / Dark Motorcycle Helmet (wide shell coverage with low forehead skin exposure)
             is_helmet = True
             conf = 0.95
-        elif (dark_ratio + gloss_ratio) > 0.38 and skin_ratio < 0.12:
-            # Black motorcycle helmet with glossy visor reflection
-            is_helmet = True
-            conf = 0.96
 
         head_box = [head_x1, head_y1, head_x2, head_y2]
         if is_helmet:
             detections.append({"bbox": head_box, "label": "hardhat", "conf": conf})
         else:
-            # Rejects caps (caps have exposed forehead skin > 20%), hair, and scarves!
+            # Baseball caps (which have exposed forehead skin > 25%) and bare hair are rejected!
             detections.append({"bbox": head_box, "label": "no_hardhat", "conf": 0.95})
 
         # 3. Torso Region (38% to 85%)
@@ -196,19 +201,19 @@ class VisionEngine:
         torso_roi = hsv[torso_y1:torso_y2, torso_x1:torso_x2]
 
         # Fluorescent Neon Green/Yellow Safety Vest
-        mask_neon = cv2.inRange(torso_roi, np.array([23, 100, 100]), np.array([48, 255, 255]))
+        mask_neon = cv2.inRange(torso_roi, np.array([22, 90, 90]), np.array([50, 255, 255]))
         # High-Vis Safety Orange Vest
-        mask_orange = cv2.inRange(torso_roi, np.array([5, 130, 120]), np.array([20, 255, 255]))
+        mask_orange = cv2.inRange(torso_roi, np.array([5, 120, 110]), np.array([20, 255, 255]))
 
         vest_pixels = cv2.countNonZero(mask_neon) + cv2.countNonZero(mask_orange)
         torso_total = max(1, torso_roi.shape[0] * torso_roi.shape[1])
         vest_ratio = vest_pixels / torso_total
 
         torso_box = [torso_x1, torso_y1, torso_x2, torso_y2]
-        if vest_ratio > 0.10:
-            detections.append({"bbox": torso_box, "label": "vest", "conf": round(min(0.98, 0.76 + vest_ratio), 2)})
+        if vest_ratio > 0.09:
+            detections.append({"bbox": torso_box, "label": "vest", "conf": round(min(0.98, 0.78 + vest_ratio), 2)})
         else:
-            # Rejects normal casual cotton shirts (black, navy, grey, casual tees)!
+            # Normal casual cotton shirts are rejected!
             detections.append({"bbox": torso_box, "label": "no_vest", "conf": 0.94})
 
         return detections
@@ -256,6 +261,8 @@ class VisionEngine:
                 "alert_key": self.current_alert_key,
                 "is_locked": True,
                 "is_halted": False,
+                "helmet_detected": self.helmet_detected,
+                "vest_detected": self.vest_detected,
                 "stats": self.daily_stats
             }
 
@@ -301,6 +308,10 @@ class VisionEngine:
                 cv2.putText(frame, "NO SAFETY VEST", (x1, max(y1 - 10, 20)),
                             cv2.FONT_HERSHEY_SIMPLEX, 0.55, (0, 0, 255), 2)
 
+        # Store live detection states
+        self.helmet_detected = helmet_detected
+        self.vest_detected = vest_detected
+
         # 4. 2-Second Hold Stabilization Timer Logic
         if person_in_frame and person_centered:
             if self.person_first_seen_time is None:
@@ -316,34 +327,37 @@ class VisionEngine:
                 color = (0, 240, 255)
             else:
                 # 2 Seconds Elapsed! Finalize scan decision and LOCK output!
-                if not helmet_detected and not vest_detected:
+                if helmet_detected and vest_detected:
+                    # Both Helmet AND Vest Detected
+                    self.current_alert_key = "CLEARED"
+                    self.current_state_text = f"🟢 WORKER #{self.worker_id_counter}: HELMET & VEST VERIFIED — SHIFT CLEARED!"
+                    color = (0, 255, 0)
+                    self.is_worker_locked = True
+                    self.daily_stats["cleared_count"] += 1
+                elif helmet_detected and not vest_detected:
+                    # Helmet present, Vest missing
+                    self.current_alert_key = "VEST_MISSING"
+                    self.current_state_text = f"🔴 WORKER #{self.worker_id_counter}: HELMET DETECTED | VEST MISSING! COLLECT FROM BIN A"
+                    color = (0, 0, 255)
+                    self.is_worker_locked = True
+                    self.daily_stats["violations_count"] += 1
+                    self.daily_stats["spare_ppe_issued"] += 1
+                elif not helmet_detected and vest_detected:
+                    # Vest present, Helmet missing
+                    self.current_alert_key = "HELMET_MISSING"
+                    self.current_state_text = f"🔴 WORKER #{self.worker_id_counter}: VEST DETECTED | HELMET MISSING! COLLECT FROM BIN A"
+                    color = (0, 0, 255)
+                    self.is_worker_locked = True
+                    self.daily_stats["violations_count"] += 1
+                    self.daily_stats["spare_ppe_issued"] += 1
+                else:
+                    # Both missing
                     self.current_alert_key = "ALL_MISSING"
                     self.current_state_text = f"🔴 WORKER #{self.worker_id_counter}: HELMET & VEST MISSING! COLLECT FROM BIN A"
                     color = (0, 0, 255)
                     self.is_worker_locked = True
                     self.daily_stats["violations_count"] += 1
                     self.daily_stats["spare_ppe_issued"] += 2
-                elif not helmet_detected:
-                    self.current_alert_key = "HELMET_MISSING"
-                    self.current_state_text = f"🔴 WORKER #{self.worker_id_counter}: HELMET MISSING! COLLECT FROM BIN A"
-                    color = (0, 0, 255)
-                    self.is_worker_locked = True
-                    self.daily_stats["violations_count"] += 1
-                    self.daily_stats["spare_ppe_issued"] += 1
-                elif not vest_detected:
-                    self.current_alert_key = "VEST_MISSING"
-                    self.current_state_text = f"🔴 WORKER #{self.worker_id_counter}: VEST MISSING! COLLECT FROM BIN A"
-                    color = (0, 0, 255)
-                    self.is_worker_locked = True
-                    self.daily_stats["violations_count"] += 1
-                    self.daily_stats["spare_ppe_issued"] += 1
-                else:
-                    # Both Helmet AND Vest Detected
-                    self.current_alert_key = "CLEARED"
-                    self.current_state_text = f"🟢 WORKER #{self.worker_id_counter}: SHIFT CLEARED!"
-                    color = (0, 255, 0)
-                    self.is_worker_locked = True
-                    self.daily_stats["cleared_count"] += 1
 
                 self.daily_stats["total_scans"] += 1
                 self.daily_stats["logs"].append({
@@ -379,6 +393,8 @@ class VisionEngine:
             "alert_key": self.current_alert_key,
             "is_locked": self.is_worker_locked,
             "is_halted": False,
+            "helmet_detected": self.helmet_detected,
+            "vest_detected": self.vest_detected,
             "stats": self.daily_stats
         }
 

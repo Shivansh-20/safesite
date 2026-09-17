@@ -118,67 +118,10 @@ def release_camera():
             logger.error(f"Error releasing camera: {e}")
         camera = None
 
-def detect_ppe_opencv(frame):
-    """
-    Real-time Computer Vision PPE Detector.
-    Analyzes actual camera frame pixels to distinguish real helmets (yellow/orange/white plastic)
-    from casual caps/hair, and fluorescent neon safety vests from ordinary shirts.
-    """
-    h, w, _ = frame.shape
-    detections = []
-    
-    # 1. Person presence
-    person_box = [int(w * 0.18), int(h * 0.10), int(w * 0.82), int(h * 0.95)]
-    detections.append({"bbox": person_box, "label": "person", "conf": 0.96})
-    
-    hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
-    
-    # 2. Head Region: top 10% to 38%
-    head_y1, head_y2 = int(h * 0.10), int(h * 0.38)
-    head_x1, head_x2 = int(w * 0.30), int(w * 0.70)
-    head_roi = hsv[head_y1:head_y2, head_x1:head_x2]
-    
-    # Yellow/Orange hardhats:
-    mask_yellow = cv2.inRange(head_roi, np.array([12, 80, 80]), np.array([36, 255, 255]))
-    # White helmets:
-    mask_white = cv2.inRange(head_roi, np.array([0, 0, 180]), np.array([180, 55, 255]))
-    helmet_pixels = cv2.countNonZero(mask_yellow) + cv2.countNonZero(mask_white)
-    head_total = max(1, head_roi.shape[0] * head_roi.shape[1])
-    helmet_ratio = helmet_pixels / head_total
-    
-    head_box = [head_x1, head_y1, head_x2, head_y2]
-    if helmet_ratio > 0.10:
-        detections.append({"bbox": head_box, "label": "hardhat", "conf": round(min(0.97, 0.78 + helmet_ratio), 2)})
-    else:
-        # Caps, beanies, or bare hair are rejected!
-        detections.append({"bbox": head_box, "label": "no_hardhat", "conf": 0.95})
-        
-    # 3. Torso Region: 38% to 85%
-    torso_y1, torso_y2 = int(h * 0.38), int(h * 0.85)
-    torso_x1, torso_x2 = int(w * 0.22), int(w * 0.78)
-    torso_roi = hsv[torso_y1:torso_y2, torso_x1:torso_x2]
-    
-    # Neon Green/Yellow Vest:
-    mask_neon = cv2.inRange(torso_roi, np.array([23, 100, 100]), np.array([48, 255, 255]))
-    # Safety Orange Vest:
-    mask_orange = cv2.inRange(torso_roi, np.array([5, 130, 120]), np.array([20, 255, 255]))
-    vest_pixels = cv2.countNonZero(mask_neon) + cv2.countNonZero(mask_orange)
-    torso_total = max(1, torso_roi.shape[0] * torso_roi.shape[1])
-    vest_ratio = vest_pixels / torso_total
-    
-    torso_box = [torso_x1, torso_y1, torso_x2, torso_y2]
-    if vest_ratio > 0.10:
-        detections.append({"bbox": torso_box, "label": "vest", "conf": round(min(0.98, 0.76 + vest_ratio), 2)})
-    else:
-        # Normal casual shirts are rejected!
-        detections.append({"bbox": torso_box, "label": "no_vest", "conf": 0.94})
-        
-    return detections
-
 def generate_frames():
     """
     MJPEG Video Stream Generator.
-    Processes camera frames through vision_engine with real-time OpenCV PPE classification.
+    Processes camera frames directly through vision_engine.
     """
     while True:
         # Check if system is halted
@@ -212,9 +155,8 @@ def generate_frames():
             cv2.putText(frame, "SAFESITE AI - CAMERA ACTIVE", (130, 240),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.7, (0, 240, 255), 2)
 
-        # Real OpenCV PPE detection on live pixels
-        sample_detections = detect_ppe_opencv(frame)
-        processed_frame, status_result = vision_engine.process_frame(frame, sample_detections)
+        # Process frame directly through vision engine with full helmet/vest analysis
+        processed_frame, status_result = vision_engine.process_frame(frame)
 
         ret, buffer = cv2.imencode('.jpg', processed_frame)
         if not ret:
@@ -296,7 +238,9 @@ def get_status():
         "is_halted": is_halted,
         "worker_id": vision_engine.worker_id_counter,
         "uptime": uptime,
-        "playlist": playlist
+        "playlist": playlist,
+        "helmet_detected": vision_engine.helmet_detected,
+        "vest_detected": vision_engine.vest_detected
     }
 
 @app.get("/api/generate_report")

@@ -509,3 +509,86 @@ body {
 .btn-block {
     width: 100%;
 }
+
+/* Dynamic Pamphlet Squares Color Coding */
+.pamphlet-item.pass {
+    background: rgba(16, 185, 129, 0.18) !important;
+    border: 2px solid #10b981 !important;
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.35);
+}
+.pamphlet-item.pass .p-status {
+    color: #10b981 !important;
+    font-weight: 800;
+}
+
+.pamphlet-item.fail {
+    background: rgba(239, 68, 68, 0.18) !important;
+    border: 2px solid #ef4444 !important;
+    box-shadow: 0 0 15px rgba(239, 68, 68, 0.35);
+}
+.pamphlet-item.fail .p-status {
+    color: #ef4444 !important;
+    font-weight: 800;
+}
+
+.pamphlet-item.manual {
+    background: rgba(245, 158, 11, 0.15) !important;
+    border: 2px solid #f59e0b !important;
+    box-shadow: 0 0 10px rgba(245, 158, 11, 0.25);
+}
+.pamphlet-item.manual .p-status {
+    color: #f59e0b !important;
+    font-weight: 800;
+}
+
+/* Presenter Quick Actions Bar */
+.presenter-bar {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-top: 14px;
+    padding: 10px 14px;
+    background: rgba(255, 255, 255, 0.03);
+    border: 1px dashed rgba(255, 255, 255, 0.18);
+    border-radius: 14px;
+}
+
+.presenter-title {
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--primary);
+    white-space: nowrap;
+}
+
+.btn-presenter {
+    flex: 1;
+    padding: 10px 12px;
+    border-radius: 10px;
+    font-size: 0.82rem;
+    font-weight: 700;
+    cursor: pointer;
+    border: none;
+    transition: all 0.2s ease;
+}
+
+.btn-pass {
+    background: rgba(16, 185, 129, 0.2);
+    border: 1px solid #10b981;
+    color: #10b981;
+}
+.btn-pass:hover {
+    background: #10b981;
+    color: #000;
+    box-shadow: 0 0 15px rgba(16, 185, 129, 0.5);
+}
+
+.btn-warn {
+    background: rgba(239, 68, 68, 0.2);
+    border: 1px solid #ef4444;
+    color: #ef4444;
+}
+.btn-warn:hover {
+    background: #ef4444;
+    color: #fff;
+    box-shadow: 0 0 15px rgba(239, 68, 68, 0.5);
+}

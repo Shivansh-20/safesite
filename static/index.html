@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css">
+    <link rel="stylesheet" href="/static/css/style.css?v=3.2">
 </head>
 <body>
     <!-- Top Navigation Header -->
@@ -43,28 +43,33 @@
                 <img src="/video_feed" id="video-stream" alt="SafeSite AI Gate Camera Stream">
                 <div class="scan-line" id="scan-line"></div>
                 
-                <!-- Visual Onboarding Pamphlet Mode Overlay (Only Pops Up After Scan Decision Locked) -->
+                <!-- Visual Onboarding Pamphlet Mode Overlay (Dynamic Color Per Gear) -->
                 <div class="pamphlet-overlay" id="pamphlet-overlay">
                     <div class="pamphlet-card">
                         <div class="pamphlet-badge">REMEDIATION GUIDE</div>
-                        <h2>🪧 MANDATORY SITE GEAR PAMPHLET</h2>
-                        <p class="pamphlet-sub">Visual Instructions for On-Site Laborers</p>
+                        <h2>🪧 MANDATORY SITE GEAR CHECK</h2>
+                        <p class="pamphlet-sub">Live Equipment Verification Breakdown</p>
                         
                         <div class="pamphlet-grid">
-                            <div class="pamphlet-item">
+                            <!-- Helmet Square (Turns GREEN if present, RED if missing) -->
+                            <div class="pamphlet-item" id="p-item-helmet">
                                 <div class="p-icon">🪖</div>
                                 <div class="p-label">1. Safety Helmet</div>
-                                <div class="p-status">🤖 AI SCANNED</div>
+                                <div class="p-status" id="p-status-helmet">AI SCANNING...</div>
                             </div>
-                            <div class="pamphlet-item">
+
+                            <!-- Vest Square (Turns GREEN if present, RED if missing) -->
+                            <div class="pamphlet-item" id="p-item-vest">
                                 <div class="p-icon">🦺</div>
                                 <div class="p-label">2. Reflective Vest</div>
-                                <div class="p-status">🤖 AI SCANNED</div>
+                                <div class="p-status" id="p-status-vest">AI SCANNING...</div>
                             </div>
-                            <div class="pamphlet-item">
+
+                            <!-- Boots Square (Always Yellow/Amber manual check) -->
+                            <div class="pamphlet-item manual" id="p-item-boots">
                                 <div class="p-icon">🥾</div>
                                 <div class="p-label">3. Safety Boots</div>
-                                <div class="p-status amber">👁️ MANUAL CHECK</div>
+                                <div class="p-status amber" id="p-status-boots">👁️ MANUAL CHECK</div>
                             </div>
                         </div>
 
@@ -95,6 +100,17 @@
             <div class="kiosk-actions">
                 <button class="btn btn-action btn-rescan" onclick="rescanWorker()">🔁 Re-Scan Worker (Equipped Gear)</button>
                 <button class="btn btn-action btn-next" onclick="nextWorker()">👤 Next Worker in Line ➔</button>
+            </div>
+
+            <!-- Presenter Quick Actions Bar (Failsafe for Presentation) -->
+            <div class="presenter-bar">
+                <span class="presenter-title">⚡ Presenter Controls:</span>
+                <button class="btn-presenter btn-pass" onclick="forceClear()" title="Hotkey: Press 'C' or '2'">
+                    🟢 Clear Worker (Key C)
+                </button>
+                <button class="btn-presenter btn-warn" onclick="forceMissing()" title="Hotkey: Press 'M' or '1'">
+                    🔴 Flag Missing (Key M)
+                </button>
             </div>
 
             <!-- Audio Script Display Banner -->
@@ -154,6 +170,6 @@
     <!-- Hidden Audio Player -->
     <audio id="audio-player"></audio>
 
-    <script src="/static/js/app.js"></script>
+    <script src="/static/js/app.js?v=3.2"></script>
 </body>
 </html>

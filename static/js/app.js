@@ -132,6 +132,39 @@ function fetchStatus() {
                 dot.style.boxShadow = '0 0 10px #00f0ff';
             }
 
+            // Dynamic Pamphlet Squares: Highlight each item based on real-time detection
+            const helmetItem = document.getElementById('p-item-helmet');
+            const helmetStatus = document.getElementById('p-status-helmet');
+            const vestItem = document.getElementById('p-item-vest');
+            const vestStatus = document.getElementById('p-status-vest');
+            const bootsItem = document.getElementById('p-item-boots');
+            const bootsStatus = document.getElementById('p-status-boots');
+
+            if (helmetItem && helmetStatus) {
+                if (data.helmet_detected) {
+                    helmetItem.className = 'pamphlet-item pass';
+                    helmetStatus.innerText = '🟢 ACCEPTED / EQUIPPED';
+                } else {
+                    helmetItem.className = 'pamphlet-item fail';
+                    helmetStatus.innerText = '🔴 MISSING / REQUIRED';
+                }
+            }
+
+            if (vestItem && vestStatus) {
+                if (data.vest_detected) {
+                    vestItem.className = 'pamphlet-item pass';
+                    vestStatus.innerText = '🟢 ACCEPTED / EQUIPPED';
+                } else {
+                    vestItem.className = 'pamphlet-item fail';
+                    vestStatus.innerText = '🔴 MISSING / REQUIRED';
+                }
+            }
+
+            if (bootsItem && bootsStatus) {
+                bootsItem.className = 'pamphlet-item manual';
+                bootsStatus.innerText = '👁️ MANUAL CHECK';
+            }
+
             // Pamphlet Auto-Display Logic: ONLY show pamphlet AFTER missing gear decision is locked
             if (data.is_locked && data.alert_key.includes('MISSING') && !isPamphletOpen) {
                 showPamphlet();
@@ -178,6 +211,14 @@ function forceClear() {
     statusText.innerText = "🟢 SHIFT CLEARED! (VERIFIED)";
     document.getElementById('script-text').innerText = "Status: Worker Verified & Cleared for Shift.";
 
+    // Highlight squares as passed
+    const helmetItem = document.getElementById('p-item-helmet');
+    const helmetStatus = document.getElementById('p-status-helmet');
+    const vestItem = document.getElementById('p-item-vest');
+    const vestStatus = document.getElementById('p-status-vest');
+    if (helmetItem) { helmetItem.className = 'pamphlet-item pass'; helmetStatus.innerText = '🟢 ACCEPTED / EQUIPPED'; }
+    if (vestItem) { vestItem.className = 'pamphlet-item pass'; vestStatus.innerText = '🟢 ACCEPTED / EQUIPPED'; }
+
     fetch('/api/force_clear', { method: 'POST' })
         .then(res => res.json())
         .then(data => {
@@ -215,16 +256,18 @@ function forceMissing() {
         .catch(err => console.error("Override missing error:", err));
 }
 
-// Listen for presenter hotkeys:
+// Global Robust Presenter Hotkeys:
 // Press 'C' or '2' -> Force Clear (Shift Cleared)
 // Press 'M' or '1' -> Force Missing Gear (Red warning + pamphlet)
 // Press 'R'        -> Re-Scan current worker
 // Press 'N'        -> Next worker in line
 // Press 'H'        -> Halt / Resume system
-window.addEventListener('keydown', function(e) {
+function handleHotkey(e) {
     if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
 
-    const key = e.key.toLowerCase();
+    const key = e.key ? e.key.toLowerCase() : '';
+    console.log("SafeSite Key Captured:", key);
+
     if (key === 'c' || key === '2') {
         forceClear();
     } else if (key === 'm' || key === '1') {
@@ -236,7 +279,10 @@ window.addEventListener('keydown', function(e) {
     } else if (key === 'h') {
         toggleHalt();
     }
-});
+}
+
+document.addEventListener('keydown', handleHotkey, true);
+window.addEventListener('keydown', handleHotkey, true);
 
 setInterval(fetchStatus, 1500);
 fetchStatus();
