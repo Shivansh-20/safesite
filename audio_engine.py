@@ -1,7 +1,8 @@
 """
 SafeSite AI — Multilingual Audio Voice Prompt Engine
-Synthesizes and delivers generalized native voice prompts in Hindi, Bhojpuri, and Maithili
-sequentially to communicate safety compliance to regional laborers without conflicting gear details.
+Synthesizes and delivers conversational, natural voice prompts in Hindi, Bhojpuri, and Maithili
+blended smoothly with familiar everyday Hindi terms (e.g. 'सेफ्टी गियर', 'गेट', 'बॉक्स').
+Zero equipment-specific names (helmet/vest) are mentioned in audio.
 """
 
 import os
@@ -17,31 +18,30 @@ BASE_DIR = os.path.dirname(__file__)
 AUDIO_DIR = os.path.join(BASE_DIR, "static", "audio")
 os.makedirs(AUDIO_DIR, exist_ok=True)
 
-# Generalized Native Regional Language Audio Scripts
-# (Focuses cleanly on: Equipment missing -> Collect spare equipment from gate box A)
+# Toned-down, natural, Hindi-blended regional audio scripts
 AUDIO_SCRIPTS = {
     "hi": {  # Hindi
-        "NOT_VISIBLE": "कृपया कैमरे के सामने सीधे और ठीक से खड़े हों।",
-        "HELMET_MISSING": "ध्यान दें! आपका सुरक्षा सामान अधूरा है। कृपया गेट पर रखे डिब्बे से सामान पहनें।",
-        "VEST_MISSING": "ध्यान दें! आपका सुरक्षा सामान अधूरा है। कृपया गेट पर रखे डिब्बे से सामान पहनें।",
-        "ALL_MISSING": "ध्यान दें! आपका सुरक्षा सामान अधूरा है। कृपया गेट पर रखे डिब्बे से सामान पहनें।",
-        "CLEARED": "सुरक्षा जांच सफल! आपका काम पर स्वागत है।",
+        "NOT_VISIBLE": "कृपया कैमरे के सामने ठीक से खड़े हों।",
+        "HELMET_MISSING": "कृपया ध्यान दें, आपका सेफ्टी गियर अधूरा है। गेट के बॉक्स से गियर पहन लें।",
+        "VEST_MISSING": "कृपया ध्यान दें, आपका सेफ्टी गियर अधूरा है। गेट के बॉक्स से गियर पहन लें।",
+        "ALL_MISSING": "कृपया ध्यान दें, आपका सेफ्टी गियर अधूरा है। गेट के बॉक्स से गियर पहन लें।",
+        "CLEARED": "सुरक्षा जांच पूरी हुई। काम पर आपका स्वागत है।",
         "DANGER_ZONE": "खतरा! इस प्रतिबंधित क्षेत्र से तुरंत पीछे हटें।"
     },
-    "bho": {  # Bhojpuri
-        "NOT_VISIBLE": "अरे भाइया! कैमरा के सोझा ठीक से खड़ा हो जाईं।",
-        "HELMET_MISSING": "अरे भाइया! राउर सुरक्षा सामान अधूरा बा। दुअरा पर राखल डिब्बा में से निकाल के पहिन ला!",
-        "VEST_MISSING": "अरे भाइया! राउर सुरक्षा सामान अधूरा बा। दुअरा पर राखल डिब्बा में से निकाल के पहिन ला!",
-        "ALL_MISSING": "अरे भाइया! राउर सुरक्षा सामान अधूरा बा। दुअरा पर राखल डिब्बा में से निकाल के पहिन ला!",
-        "CLEARED": "सुरक्षा जाँच ठीक बा! काम पर राउर स्वागत बा।",
-        "DANGER_ZONE": "खतरा बा! एहि जगह से तुरंत बहरा निकलीं!"
+    "bho": {  # Bhojpuri (Natural Conversational / Blended with Hindi)
+        "NOT_VISIBLE": "भइया, कैमरा के सामने ठीक से खड़ा हो जाईं।",
+        "HELMET_MISSING": "भइया ध्यान दीं, राउर सेफ्टी गियर बाकी बा। गेट के बॉक्स से गियर पहिन लीं।",
+        "VEST_MISSING": "भइया ध्यान दीं, राउर सेफ्टी गियर बाकी बा। गेट के बॉक्स से गियर पहिन लीं।",
+        "ALL_MISSING": "भइया ध्यान दीं, राउर सेफ्टी गियर बाकी बा। गेट के बॉक्स से गियर पहिन लीं।",
+        "CLEARED": "जांच पूरा भइल। काम पर स्वागत बा।",
+        "DANGER_ZONE": "खतरा बा! एहि जगह से तुरंत बाहर निकलीं!"
     },
-    "mai": {  # Bihari / Maithili
-        "NOT_VISIBLE": "सुनू भाई! क्यामरा कऽ सोझा ठीक सँ ठाढ़ि हू।",
-        "HELMET_MISSING": "सुनू भाई! अहाँक सुरक्षा सामान नहि अछि। दुआरि पर राखल पेटी सँ लऽ कऽ पहिरू।",
-        "VEST_MISSING": "सुनू भाई! अहाँक सुरक्षा सामान नहि अछि। दुआरि पर राखल पेटी सँ लऽ कऽ पहिरू।",
-        "ALL_MISSING": "सुनू भाई! अहाँक सुरक्षा सामान नहि अछि। दुआरि पर राखल पेटी सँ लऽ कऽ पहिरू।",
-        "CLEARED": "सुरक्षा जाँच सफल! काज पर अहाँक स्वागत अछि।",
+    "mai": {  # Bihari / Maithili (Natural Conversational / Blended with Hindi)
+        "NOT_VISIBLE": "भाई जी, कैमरा के सामने ठीक सँ खड़ा रहू।",
+        "HELMET_MISSING": "भाई जी ध्यान दियौ, अहाँक सेफ्टी गियर बाकी अछि। गेट के बॉक्स सँ गियर पहिर लियौ।",
+        "VEST_MISSING": "भाई जी ध्यान दियौ, अहाँक सेफ्टी गियर बाकी अछि। गेट के बॉक्स सँ गियर पहिर लियौ।",
+        "ALL_MISSING": "भाई जी ध्यान दियौ, अहाँक सेफ्टी गियर बाकी अछि। गेट के बॉक्स सँ गियर पहिर लियौ।",
+        "CLEARED": "जांच पूरा भेल। काम पर स्वागत अछि।",
         "DANGER_ZONE": "खतरा अछि! एहि ठाउँ सँ तुरंत बाहर भऽ जाऊ।"
     }
 }
@@ -56,13 +56,12 @@ class MultilingualAudioEngine:
 
     def _pregenerate_audio_files(self):
         """Generates MP3 audio files for low-latency playback."""
-        logger.info("Initializing Multilingual Audio Assets...")
+        logger.info("Initializing Multilingual Audio Assets (Toned-down Hindi-blended)...")
         for lang_code, messages in AUDIO_SCRIPTS.items():
             for alert_key, text_content in messages.items():
                 filename = f"{lang_code}_{alert_key}.mp3"
                 filepath = os.path.join(AUDIO_DIR, filename)
-                # Overwrite to ensure generalized prompts are saved
-                if not os.path.exists(filepath) or os.path.getsize(filepath) < 1000:
+                if not os.path.exists(filepath):
                     try:
                         tts = gTTS(text=text_content, lang="hi", slow=False)
                         tts.save(filepath)
@@ -81,7 +80,7 @@ class MultilingualAudioEngine:
             if os.path.exists(filepath):
                 playlist.append({
                     "lang": lang,
-                    "url": f"/static/audio/{filename}?v=2.0",
+                    "url": f"/static/audio/{filename}?t=" + str(int(time.time())),
                     "text": AUDIO_SCRIPTS[lang].get(alert_key, "")
                 })
         return playlist

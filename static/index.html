@@ -7,7 +7,7 @@
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;600;800&display=swap" rel="stylesheet">
-    <link rel="stylesheet" href="/static/css/style.css?v=3.2">
+    <link rel="stylesheet" href="/static/css/style.css?v=4.0">
 </head>
 <body>
     <!-- Top Navigation Header -->
@@ -102,17 +102,6 @@
                 <button class="btn btn-action btn-next" onclick="nextWorker()">👤 Next Worker in Line ➔</button>
             </div>
 
-            <!-- Presenter Quick Actions Bar (Failsafe for Presentation) -->
-            <div class="presenter-bar">
-                <span class="presenter-title">⚡ Presenter Controls:</span>
-                <button class="btn-presenter btn-pass" onclick="forceClear()" title="Hotkey: Press 'C' or '2'">
-                    🟢 Clear Worker (Key C)
-                </button>
-                <button class="btn-presenter btn-warn" onclick="forceMissing()" title="Hotkey: Press 'M' or '1'">
-                    🔴 Flag Missing (Key M)
-                </button>
-            </div>
-
             <!-- Audio Script Display Banner -->
             <div class="script-box">
                 <span class="script-icon">📢</span>
@@ -170,6 +159,6 @@
     <!-- Hidden Audio Player -->
     <audio id="audio-player"></audio>
 
-    <script src="/static/js/app.js?v=3.2"></script>
+    <script src="/static/js/app.js?v=4.0"></script>
 </body>
 </html>
