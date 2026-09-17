@@ -161,24 +161,58 @@ videoStream.onerror = function() {
 // PRESENTER SECRET HOTKEYS (TRICK C)
 // =============================================================================
 function forceClear() {
-    if (isPamphletOpen) hidePamphlet();
+    // 1. Instantly kill any playing warning audio
+    audioPlayer.pause();
+    audioPlayer.currentTime = 0;
+    currentPlaylist = [];
+    currentPlaylistIndex = 0;
+
+    // 2. Instantly hide pamphlet overlay
+    hidePamphlet();
+
+    // 3. Immediate zero-latency UI update
+    const dot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+    dot.style.backgroundColor = '#10b981';
+    dot.style.boxShadow = '0 0 15px #10b981';
+    statusText.innerText = "🟢 SHIFT CLEARED! (VERIFIED)";
+    document.getElementById('script-text').innerText = "Status: Worker Verified & Cleared for Shift.";
+
     fetch('/api/force_clear', { method: 'POST' })
         .then(res => res.json())
         .then(data => {
             console.log("Presenter override: CLEARED", data);
-            lastAlertKey = '';
+            lastAlertKey = 'CLEARED';
             fetchStatus();
-        });
+        })
+        .catch(err => console.error("Override clear error:", err));
 }
 
 function forceMissing() {
+    // 1. Instantly kill previous audio
+    audioPlayer.pause();
+    audioPlayer.currentTime = 0;
+    currentPlaylist = [];
+    currentPlaylistIndex = 0;
+
+    // 2. Immediate zero-latency UI update
+    const dot = document.getElementById('status-dot');
+    const statusText = document.getElementById('status-text');
+    dot.style.backgroundColor = '#ef4444';
+    dot.style.boxShadow = '0 0 15px #ef4444';
+    statusText.innerText = "🔴 HELMET & VEST MISSING! COLLECT FROM BIN A";
+
+    // 3. Pop up visual pamphlet
+    showPamphlet();
+
     fetch('/api/force_missing', { method: 'POST' })
         .then(res => res.json())
         .then(data => {
             console.log("Presenter override: MISSING", data);
-            lastAlertKey = '';
+            lastAlertKey = 'ALL_MISSING';
             fetchStatus();
-        });
+        })
+        .catch(err => console.error("Override missing error:", err));
 }
 
 // Listen for presenter hotkeys:

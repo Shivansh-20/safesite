@@ -89,6 +89,7 @@ class VisionEngine:
         self.is_worker_locked = True
         self.current_alert_key = "CLEARED"
         self.current_state_text = f"🟢 WORKER #{self.worker_id_counter}: SHIFT CLEARED!"
+        self.person_first_seen_time = None
         self.daily_stats["cleared_count"] += 1
         self.daily_stats["total_scans"] += 1
         self.daily_stats["logs"].append({
@@ -107,6 +108,7 @@ class VisionEngine:
         self.is_worker_locked = True
         self.current_alert_key = "ALL_MISSING"
         self.current_state_text = f"🔴 WORKER #{self.worker_id_counter}: HELMET & VEST MISSING! COLLECT FROM BIN A"
+        self.person_first_seen_time = None
         self.daily_stats["violations_count"] += 1
         self.daily_stats["spare_ppe_issued"] += 2
         self.daily_stats["total_scans"] += 1
@@ -121,8 +123,12 @@ class VisionEngine:
     def detect_ppe_opencv(self, frame: np.ndarray) -> List[Dict]:
         """
         Real-time Computer Vision Filter for Helmets & Vests.
-        Uses HSV color masking, saturation thresholds, and plastic reflection checks
-        to strictly reject casual caps, beanies, bare hair, and ordinary cotton shirts.
+        Recognizes:
+        - Bright Helmets: Yellow, Orange, and White Hardhats
+        - Dark/Black Motorcycle Helmets: Full head coverage shell without exposed forehead skin
+        Rejects:
+        - Casual Baseball Caps, Beanies, Hair, and Scarves (gamcha)
+        - Ordinary Cotton Shirts (lack high-vis fluorescent saturation)
         """
         h, w, _ = frame.shape
         detections = []
@@ -137,21 +143,51 @@ class VisionEngine:
         head_y1, head_y2 = int(h * 0.10), int(h * 0.38)
         head_x1, head_x2 = int(w * 0.30), int(w * 0.70)
         head_roi = hsv[head_y1:head_y2, head_x1:head_x2]
-
-        # Yellow/Orange Safety Helmets & Hardhats
-        mask_yellow = cv2.inRange(head_roi, np.array([12, 80, 80]), np.array([36, 255, 255]))
-        # Bright White Helmets / Motorcycle Helmets (high brightness, low saturation)
-        mask_white = cv2.inRange(head_roi, np.array([0, 0, 180]), np.array([180, 55, 255]))
-
-        helmet_pixels = cv2.countNonZero(mask_yellow) + cv2.countNonZero(mask_white)
         head_total = max(1, head_roi.shape[0] * head_roi.shape[1])
-        helmet_ratio = helmet_pixels / head_total
+
+        # (A) Bright Helmets (Yellow / Orange Hardhats, White Helmets)
+        mask_yellow = cv2.inRange(head_roi, np.array([12, 70, 70]), np.array([38, 255, 255]))
+        mask_white = cv2.inRange(head_roi, np.array([0, 0, 180]), np.array([180, 60, 255]))
+        bright_pixels = cv2.countNonZero(mask_yellow) + cv2.countNonZero(mask_white)
+        bright_ratio = bright_pixels / head_total
+
+        # (B) Black / Dark Motorcycle Helmets
+        # Measures full cranial dome coverage vs exposed skin
+        mask_dark_shell = cv2.inRange(head_roi, np.array([0, 0, 0]), np.array([180, 255, 75]))
+        dark_pixels = cv2.countNonZero(mask_dark_shell)
+        dark_ratio = dark_pixels / head_total
+
+        # Human Skin Tone in HSV (covers Indian & diverse skin tones)
+        mask_skin = cv2.inRange(head_roi, np.array([0, 30, 60]), np.array([25, 175, 245]))
+        skin_pixels = cv2.countNonZero(mask_skin)
+        skin_ratio = skin_pixels / head_total
+
+        # High-gloss reflection on visor/helmet shell
+        mask_gloss = cv2.inRange(head_roi, np.array([0, 0, 215]), np.array([180, 45, 255]))
+        gloss_pixels = cv2.countNonZero(mask_gloss)
+        gloss_ratio = gloss_pixels / head_total
+
+        is_helmet = False
+        conf = 0.94
+
+        if bright_ratio > 0.10:
+            # Yellow / Orange / White helmet
+            is_helmet = True
+            conf = round(min(0.98, 0.80 + bright_ratio), 2)
+        elif dark_ratio > 0.40 and skin_ratio < 0.15:
+            # Black / Dark full motorcycle helmet: heavy shell covering forehead/temples with low skin exposed
+            is_helmet = True
+            conf = 0.95
+        elif (dark_ratio + gloss_ratio) > 0.38 and skin_ratio < 0.12:
+            # Black motorcycle helmet with glossy visor reflection
+            is_helmet = True
+            conf = 0.96
 
         head_box = [head_x1, head_y1, head_x2, head_y2]
-        if helmet_ratio > 0.10:
-            detections.append({"bbox": head_box, "label": "hardhat", "conf": round(min(0.97, 0.78 + helmet_ratio), 2)})
+        if is_helmet:
+            detections.append({"bbox": head_box, "label": "hardhat", "conf": conf})
         else:
-            # Rejects baseball caps, cloth beanies, or bare hair!
+            # Rejects caps (caps have exposed forehead skin > 20%), hair, and scarves!
             detections.append({"bbox": head_box, "label": "no_hardhat", "conf": 0.95})
 
         # 3. Torso Region (38% to 85%)
