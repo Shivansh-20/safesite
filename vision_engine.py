@@ -205,34 +205,37 @@ class VisionEngine:
         face_skin = cv2.countNonZero(cv2.inRange(face_hsv, np.array([0, 25, 45]), np.array([25, 175, 245]))) / face_total
         crown_skin = cv2.countNonZero(cv2.inRange(crown_hsv, np.array([0, 25, 45]), np.array([25, 175, 245]))) / crown_total
 
-        # Yellow / Orange Construction Hardhat
-        crown_yellow = cv2.countNonZero(cv2.inRange(crown_hsv, np.array([12, 65, 65]), np.array([38, 255, 255]))) / crown_total
-        # White Construction Hardhat
-        crown_white = cv2.countNonZero(cv2.inRange(crown_hsv, np.array([0, 0, 180]), np.array([180, 50, 255]))) / crown_total
-        # Dark Motorcycle Helmet Shell
-        crown_dark = cv2.countNonZero(cv2.inRange(crown_hsv, np.array([0, 0, 0]), np.array([180, 255, 85]))) / crown_total
+        # Isolate central dome (excludes background room walls on left and right)
+        dome_crop = crown_crop[:, int(0.22 * w_h):int(0.78 * w_h)]
+        dome_hsv = cv2.cvtColor(dome_crop, cv2.COLOR_BGR2HSV)
+        dome_total = max(1, dome_crop.shape[0] * dome_crop.shape[1])
 
-        # Sides of helmet (ears/temples wrap)
-        left_side = head_crop[0:int(0.65 * h_h), 0:int(0.25 * w_h)]
-        right_side = head_crop[0:int(0.65 * h_h), int(0.75 * w_h):w_h]
-        side_total = max(1, left_side.shape[0] * left_side.shape[1] + right_side.shape[0] * right_side.shape[1])
-        side_dark = (cv2.countNonZero(cv2.inRange(cv2.cvtColor(left_side, cv2.COLOR_BGR2HSV), np.array([0, 0, 0]), np.array([180, 255, 85]))) +
-                     cv2.countNonZero(cv2.inRange(cv2.cvtColor(right_side, cv2.COLOR_BGR2HSV), np.array([0, 0, 0]), np.array([180, 255, 85])))) / side_total
+        dome_yellow = cv2.countNonZero(cv2.inRange(dome_hsv, np.array([12, 65, 65]), np.array([38, 255, 255]))) / dome_total
+        dome_orange = cv2.countNonZero(cv2.inRange(dome_hsv, np.array([5, 100, 100]), np.array([18, 255, 255]))) / dome_total
+        dome_white = cv2.countNonZero(cv2.inRange(dome_hsv, np.array([0, 0, 185]), np.array([180, 50, 255]))) / dome_total
+        dome_dark = cv2.countNonZero(cv2.inRange(dome_hsv, np.array([0, 0, 0]), np.array([180, 255, 80]))) / dome_total
+
+        # Specular Gloss Reflection Points strictly inside the central cranial dome
+        # Polycarbonate / fiberglass helmet shell reflects intense white glare points (V > 205, S < 50)
+        # Bare human hair is matte/fibrous and has virtually zero specular glare points (< 5 pixels)
+        dome_glare = cv2.inRange(dome_hsv, np.array([0, 0, 205]), np.array([180, 50, 255]))
+        dome_glare_count = cv2.countNonZero(dome_glare)
 
         is_helmet = False
         conf = 0.94
 
-        if crown_yellow > 0.08:
-            # Verified Yellow/Orange Construction Hardhat
+        if dome_yellow > 0.08 or dome_orange > 0.08:
+            # Verified Yellow / Orange Construction Hardhat
             is_helmet = True
-            conf = round(min(0.98, 0.82 + crown_yellow), 2)
-        elif crown_white > 0.18 and crown_skin < 0.15:
+            conf = round(min(0.98, 0.82 + dome_yellow + dome_orange), 2)
+        elif dome_white > 0.18:
             # Verified Bright White Hardhat
             is_helmet = True
             conf = 0.95
-        elif (crown_dark > 0.22 or (crown_dark > 0.15 and side_dark > 0.18)) and crown_skin < 0.18 and face_skin > 0.06:
+        elif dome_dark > 0.35 and dome_glare_count >= 18:
             # Verified Dark Motorcycle Helmet:
-            # Dark rigid dome covering crown down to eyebrows, sides wrapped, with human face clearly visible underneath!
+            # Rigid dark dome shell with confirmed specular light reflection on cranium!
+            # Bare hair has NO specular glare spots and is REJECTED!
             is_helmet = True
             conf = 0.96
 
