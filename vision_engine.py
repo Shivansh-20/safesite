@@ -203,55 +203,51 @@ class VisionEngine:
 
         # -------------------------------------------------------------
         # 2. HELMET VS. CAP / BARE HEAD DISCRIMINATION
-        # Partition head into Crown (top 42%) and Face (bottom 58%)
+        # Partition head into Crown (top 38%) and Sides (Ears/Temples)
         # -------------------------------------------------------------
         h_h, w_h, _ = head_crop.shape
-        crown_crop = head_crop[0:int(0.42 * h_h), int(0.18 * w_h):int(0.82 * w_h)]
+        crown_crop = head_crop[0:int(0.38 * h_h), int(0.18 * w_h):int(0.82 * w_h)]
         crown_total = max(1, crown_crop.shape[0] * crown_crop.shape[1])
         crown_hsv = cv2.cvtColor(crown_crop, cv2.COLOR_BGR2HSV)
 
-        face_crop = head_crop[int(0.38 * h_h):h_h, int(0.18 * w_h):int(0.82 * w_h)]
-        face_total = max(1, face_crop.shape[0] * face_crop.shape[1])
-        face_hsv = cv2.cvtColor(face_crop, cv2.COLOR_BGR2HSV)
+        # Sides of head (Ears / Temples - where a motorcycle helmet wraps around the head)
+        left_side = head_crop[int(0.12 * h_h):int(0.60 * h_h), 0:int(0.24 * w_h)]
+        right_side = head_crop[int(0.12 * h_h):int(0.60 * h_h), int(0.76 * w_h):w_h]
+        side_total = max(1, left_side.shape[0] * left_side.shape[1] + right_side.shape[0] * right_side.shape[1])
+        side_dark_pixels = cv2.countNonZero(cv2.inRange(cv2.cvtColor(left_side, cv2.COLOR_BGR2HSV), np.array([0, 0, 0]), np.array([180, 255, 80]))) + \
+                           cv2.countNonZero(cv2.inRange(cv2.cvtColor(right_side, cv2.COLOR_BGR2HSV), np.array([0, 0, 0]), np.array([180, 255, 80])))
+        dark_side_ratio = side_dark_pixels / side_total
 
         # (A) Check for Yellow / High-Vis Orange Hardhat in Crown:
-        # High saturation yellow/orange plastic (immune to white walls and skin)
-        mask_yellow_crown = cv2.inRange(crown_hsv, np.array([12, 85, 80]), np.array([38, 255, 255]))
+        mask_yellow_crown = cv2.inRange(crown_hsv, np.array([12, 75, 75]), np.array([38, 255, 255]))
         yellow_ratio = cv2.countNonZero(mask_yellow_crown) / crown_total
 
-        # (B) Check for Face / Forehead Skin:
-        mask_face_skin = cv2.inRange(face_hsv, np.array([0, 25, 55]), np.array([25, 175, 245]))
-        face_skin_ratio = cv2.countNonZero(mask_face_skin) / face_total
-
-        # (C) Check for Dark Motorcycle Helmet Dome in Crown:
-        mask_dark_crown = cv2.inRange(crown_hsv, np.array([0, 0, 0]), np.array([180, 255, 75]))
+        # (B) Check for Dark Shell in Crown (Motorcycle Helmet):
+        mask_dark_crown = cv2.inRange(crown_hsv, np.array([0, 0, 0]), np.array([180, 255, 85]))
         dark_crown_ratio = cv2.countNonZero(mask_dark_crown) / crown_total
-
-        # (D) Visor Reflection:
-        mask_gloss_face = cv2.inRange(face_hsv, np.array([0, 0, 215]), np.array([180, 45, 255]))
-        gloss_ratio = cv2.countNonZero(mask_gloss_face) / face_total
 
         is_helmet = False
         conf = 0.94
 
-        if yellow_ratio > 0.12:
-            # Verified Yellow/Orange Hardhat
+        if yellow_ratio > 0.10:
+            # Verified Yellow/Orange Construction Hardhat
             is_helmet = True
             conf = round(min(0.98, 0.82 + yellow_ratio), 2)
-        elif dark_crown_ratio > 0.38 and face_skin_ratio < 0.12:
-            # Full Motorcycle Helmet: covers forehead and temples, dark shell, low skin exposed
+        elif dark_crown_ratio > 0.24 and dark_side_ratio > 0.16:
+            # Motorcycle Helmet: covers top crown AND wraps around ears/sides of head!
+            # Works even if your face/eyes/mouth are 100% visible!
             is_helmet = True
             conf = 0.95
-        elif dark_crown_ratio > 0.32 and gloss_ratio > 0.06 and face_skin_ratio < 0.14:
-            # Motorcycle helmet with reflective visor down
+        elif dark_crown_ratio > 0.45:
+            # Full Dark Helmet covering cranial dome
             is_helmet = True
-            conf = 0.96
+            conf = 0.94
 
         head_box = [head_x1, head_y1, head_x2, head_y2]
         if is_helmet:
             detections.append({"bbox": head_box, "label": "hardhat", "conf": conf})
         else:
-            # Rejects baseball caps (forehead skin exposed > 15%), beanies, and bare hair!
+            # Rejects baseball caps (caps do not wrap ears/sides) and bare hair!
             detections.append({"bbox": head_box, "label": "no_hardhat", "conf": 0.95})
 
         # -------------------------------------------------------------
