@@ -157,5 +157,52 @@ videoStream.onerror = function() {
     }
 };
 
+// =============================================================================
+// PRESENTER SECRET HOTKEYS (TRICK C)
+// =============================================================================
+function forceClear() {
+    if (isPamphletOpen) hidePamphlet();
+    fetch('/api/force_clear', { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            console.log("Presenter override: CLEARED", data);
+            lastAlertKey = '';
+            fetchStatus();
+        });
+}
+
+function forceMissing() {
+    fetch('/api/force_missing', { method: 'POST' })
+        .then(res => res.json())
+        .then(data => {
+            console.log("Presenter override: MISSING", data);
+            lastAlertKey = '';
+            fetchStatus();
+        });
+}
+
+// Listen for presenter hotkeys:
+// Press 'C' or '2' -> Force Clear (Shift Cleared)
+// Press 'M' or '1' -> Force Missing Gear (Red warning + pamphlet)
+// Press 'R'        -> Re-Scan current worker
+// Press 'N'        -> Next worker in line
+// Press 'H'        -> Halt / Resume system
+window.addEventListener('keydown', function(e) {
+    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+
+    const key = e.key.toLowerCase();
+    if (key === 'c' || key === '2') {
+        forceClear();
+    } else if (key === 'm' || key === '1') {
+        forceMissing();
+    } else if (key === 'r') {
+        rescanWorker();
+    } else if (key === 'n') {
+        nextWorker();
+    } else if (key === 'h') {
+        toggleHalt();
+    }
+});
+
 setInterval(fetchStatus, 1500);
 fetchStatus();
