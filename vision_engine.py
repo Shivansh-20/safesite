@@ -131,139 +131,145 @@ class VisionEngine:
 
     def detect_ppe_opencv(self, frame: np.ndarray) -> List[Dict]:
         """
-        Real-time Computer Vision Filter.
-        1. Confirms a human head is ACTUALLY present in front of the camera (never triggers on empty background).
-        2. Differentiates Helmets (Hardhats, White/Yellow Helmets, Black Motorcycle Helmets) from Caps/Hair/Scarves.
-        3. Differentiates High-Vis Reflective Vests from normal cotton shirts.
+        Real-time Adaptive Computer Vision Filter:
+        1. Confirms a human head/face is present in front of the camera (never triggers on empty room/wall).
+        2. Dynamically locates the head and torso based on human silhouette & face skin cues,
+           adapting seamlessly whether the user is sitting at a desk or standing at a kiosk.
+        3. Differentiates Helmets (Hardhats, White/Yellow Helmets, Dark Motorcycle Helmets) from Caps/Hair/Scarves.
+        4. Differentiates High-Vis Reflective Vests from normal cotton shirts.
         """
         h, w, _ = frame.shape
         detections = []
 
-        # Target Head ROI (Top 8% to 44% of frame, centered)
-        head_y1, head_y2 = int(h * 0.08), int(h * 0.44)
-        head_x1, head_x2 = int(w * 0.25), int(w * 0.75)
-        head_crop = frame[head_y1:head_y2, head_x1:head_x2]
-        head_total = max(1, head_crop.shape[0] * head_crop.shape[1])
-
-        # Target Torso ROI (38% to 85% of frame)
-        torso_y1, torso_y2 = int(h * 0.40), int(h * 0.85)
-        torso_x1, torso_x2 = int(w * 0.20), int(w * 0.80)
-        torso_crop = frame[torso_y1:torso_y2, torso_x1:torso_x2]
-        torso_total = max(1, torso_crop.shape[0] * torso_crop.shape[1])
-
-        hsv_head = cv2.cvtColor(head_crop, cv2.COLOR_BGR2HSV)
-        gray_head = cv2.cvtColor(head_crop, cv2.COLOR_BGR2GRAY)
-        head_contrast = float(np.std(gray_head))
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
 
         # -------------------------------------------------------------
-        # 1. HUMAN HEAD PRESENCE CHECK (Must be a real human head, not empty wall/ceiling)
+        # 1. HUMAN HEAD & FACE PRESENCE CHECK
         # -------------------------------------------------------------
-        # Human skin detection (face / neck / forehead)
-        mask_skin = cv2.inRange(hsv_head, np.array([0, 25, 55]), np.array([25, 175, 245]))
-        skin_ratio = cv2.countNonZero(mask_skin) / head_total
+        # Human skin tone mask across the central frame
+        skin_mask = cv2.inRange(hsv, np.array([0, 25, 45]), np.array([25, 175, 245]))
+        skin_mask[0:int(h * 0.05), :] = 0
+        skin_mask[int(h * 0.92):, :] = 0
 
-        # Yellow/Orange plastic helmet
-        mask_yellow = cv2.inRange(hsv_head, np.array([12, 60, 60]), np.array([38, 255, 255]))
-        # Bright white helmet
-        mask_white = cv2.inRange(hsv_head, np.array([0, 0, 175]), np.array([180, 65, 255]))
-        bright_ratio = (cv2.countNonZero(mask_yellow) + cv2.countNonZero(mask_white)) / head_total
+        # Central column (where the person sits or stands)
+        center_x1, center_x2 = int(w * 0.20), int(w * 0.80)
+        center_skin = skin_mask[:, center_x1:center_x2]
+        skin_pixels = cv2.countNonZero(center_skin)
+        skin_ratio_global = skin_pixels / max(1, (center_skin.shape[0] * center_skin.shape[1]))
 
-        # Dark helmet shell
-        mask_dark = cv2.inRange(hsv_head, np.array([0, 0, 0]), np.array([180, 255, 75]))
-        dark_ratio = cv2.countNonZero(mask_dark) / head_total
-
-        # Glossy specular reflection
-        mask_gloss = cv2.inRange(hsv_head, np.array([0, 0, 210]), np.array([180, 45, 255]))
-        gloss_ratio = cv2.countNonZero(mask_gloss) / head_total
-
-        gray_torso = cv2.cvtColor(torso_crop, cv2.COLOR_BGR2GRAY)
-        torso_contrast = float(np.std(gray_torso))
-
-        # Verify presence: Need either visible human skin, or bright helmet, or dark motorcycle helmet with human body
-        is_human_present = False
-        if head_contrast > 16:
-            if skin_ratio > 0.08:
-                # Definite human face / head present in frame!
-                is_human_present = True
-            elif bright_ratio > 0.08 and torso_contrast > 18:
-                # Human wearing yellow/white hardhat in front of camera
-                is_human_present = True
-            elif dark_ratio > 0.35 and (torso_contrast > 20 or gloss_ratio > 0.04):
-                # Human wearing full motorcycle helmet sitting/standing in front of camera
-                is_human_present = True
-
-        if not is_human_present:
-            # NO HUMAN HEAD IS IN VIEW (Empty room / camera pointing away)
-            # Return empty detections so system prompts to focus / step up!
+        # If there is virtually zero human skin in the center of the camera view:
+        # Camera is pointing at ceiling, wall, or empty chair
+        if skin_ratio_global < 0.035:
             return []
 
-        # Human is confirmed in frame! Add person bounding box
-        person_box = [int(w * 0.18), int(h * 0.10), int(w * 0.82), int(h * 0.95)]
-        detections.append({"bbox": person_box, "label": "person", "conf": 0.96})
+        # -------------------------------------------------------------
+        # 2. DYNAMIC HEAD & APEX LOCALIZATION
+        # Locate the top of the head/helmet dome using horizontal edge silhouette
+        # -------------------------------------------------------------
+        edges = cv2.Canny(gray, 40, 120)
+        edges[0:int(h * 0.05), :] = 0
+        edges[int(h * 0.92):, :] = 0
 
-        # -------------------------------------------------------------
-        # 2. HELMET VS. CAP / BARE HEAD DISCRIMINATION
-        # Partition head into Crown (top 38%) and Sides (Ears/Temples)
-        # -------------------------------------------------------------
+        head_top_y = None
+        for y in range(int(h * 0.06), int(h * 0.65)):
+            if np.sum(edges[y, int(w * 0.25):int(w * 0.75)] > 0) > 12:
+                head_top_y = y
+                break
+
+        if head_top_y is None:
+            head_top_y = int(h * 0.15)
+
+        # Determine Head Bounding Box based on detected apex:
+        head_y1 = max(0, head_top_y)
+        head_y2 = min(h - 50, head_top_y + int(h * 0.38))
+        head_x1 = int(w * 0.22)
+        head_x2 = int(w * 0.78)
+
+        head_crop = frame[head_y1:head_y2, head_x1:head_x2]
         h_h, w_h, _ = head_crop.shape
-        crown_crop = head_crop[0:int(0.38 * h_h), int(0.18 * w_h):int(0.82 * w_h)]
-        crown_total = max(1, crown_crop.shape[0] * crown_crop.shape[1])
+        if h_h < 30 or w_h < 30:
+            return []
+
+        # Partition Head into Crown Dome (top 46%) and Face (bottom 54%)
+        crown_crop = head_crop[0:int(0.46 * h_h), :]
+        face_crop = head_crop[int(0.46 * h_h):, :]
+
         crown_hsv = cv2.cvtColor(crown_crop, cv2.COLOR_BGR2HSV)
+        face_hsv = cv2.cvtColor(face_crop, cv2.COLOR_BGR2HSV)
 
-        # Sides of head (Ears / Temples - where a motorcycle helmet wraps around the head)
-        left_side = head_crop[int(0.12 * h_h):int(0.60 * h_h), 0:int(0.24 * w_h)]
-        right_side = head_crop[int(0.12 * h_h):int(0.60 * h_h), int(0.76 * w_h):w_h]
+        crown_total = max(1, crown_crop.shape[0] * crown_crop.shape[1])
+        face_total = max(1, face_crop.shape[0] * face_crop.shape[1])
+
+        # Feature Ratios:
+        face_skin = cv2.countNonZero(cv2.inRange(face_hsv, np.array([0, 25, 45]), np.array([25, 175, 245]))) / face_total
+        crown_skin = cv2.countNonZero(cv2.inRange(crown_hsv, np.array([0, 25, 45]), np.array([25, 175, 245]))) / crown_total
+
+        # Yellow / Orange Construction Hardhat
+        crown_yellow = cv2.countNonZero(cv2.inRange(crown_hsv, np.array([12, 65, 65]), np.array([38, 255, 255]))) / crown_total
+        # White Construction Hardhat
+        crown_white = cv2.countNonZero(cv2.inRange(crown_hsv, np.array([0, 0, 180]), np.array([180, 50, 255]))) / crown_total
+        # Dark Motorcycle Helmet Shell
+        crown_dark = cv2.countNonZero(cv2.inRange(crown_hsv, np.array([0, 0, 0]), np.array([180, 255, 85]))) / crown_total
+
+        # Sides of helmet (ears/temples wrap)
+        left_side = head_crop[0:int(0.65 * h_h), 0:int(0.25 * w_h)]
+        right_side = head_crop[0:int(0.65 * h_h), int(0.75 * w_h):w_h]
         side_total = max(1, left_side.shape[0] * left_side.shape[1] + right_side.shape[0] * right_side.shape[1])
-        side_dark_pixels = cv2.countNonZero(cv2.inRange(cv2.cvtColor(left_side, cv2.COLOR_BGR2HSV), np.array([0, 0, 0]), np.array([180, 255, 80]))) + \
-                           cv2.countNonZero(cv2.inRange(cv2.cvtColor(right_side, cv2.COLOR_BGR2HSV), np.array([0, 0, 0]), np.array([180, 255, 80])))
-        dark_side_ratio = side_dark_pixels / side_total
-
-        # (A) Check for Yellow / High-Vis Orange Hardhat in Crown:
-        mask_yellow_crown = cv2.inRange(crown_hsv, np.array([12, 75, 75]), np.array([38, 255, 255]))
-        yellow_ratio = cv2.countNonZero(mask_yellow_crown) / crown_total
-
-        # (B) Check for Dark Shell in Crown (Motorcycle Helmet):
-        mask_dark_crown = cv2.inRange(crown_hsv, np.array([0, 0, 0]), np.array([180, 255, 85]))
-        dark_crown_ratio = cv2.countNonZero(mask_dark_crown) / crown_total
+        side_dark = (cv2.countNonZero(cv2.inRange(cv2.cvtColor(left_side, cv2.COLOR_BGR2HSV), np.array([0, 0, 0]), np.array([180, 255, 85]))) +
+                     cv2.countNonZero(cv2.inRange(cv2.cvtColor(right_side, cv2.COLOR_BGR2HSV), np.array([0, 0, 0]), np.array([180, 255, 85])))) / side_total
 
         is_helmet = False
         conf = 0.94
 
-        if yellow_ratio > 0.10:
+        if crown_yellow > 0.08:
             # Verified Yellow/Orange Construction Hardhat
             is_helmet = True
-            conf = round(min(0.98, 0.82 + yellow_ratio), 2)
-        elif dark_crown_ratio > 0.24 and dark_side_ratio > 0.16:
-            # Motorcycle Helmet: covers top crown AND wraps around ears/sides of head!
-            # Works even if your face/eyes/mouth are 100% visible!
+            conf = round(min(0.98, 0.82 + crown_yellow), 2)
+        elif crown_white > 0.18 and crown_skin < 0.15:
+            # Verified Bright White Hardhat
             is_helmet = True
             conf = 0.95
-        elif dark_crown_ratio > 0.45:
-            # Full Dark Helmet covering cranial dome
+        elif (crown_dark > 0.22 or (crown_dark > 0.15 and side_dark > 0.18)) and crown_skin < 0.18 and face_skin > 0.06:
+            # Verified Dark Motorcycle Helmet:
+            # Dark rigid dome covering crown down to eyebrows, sides wrapped, with human face clearly visible underneath!
             is_helmet = True
-            conf = 0.94
+            conf = 0.96
 
+        # Person Bounding Box:
+        person_box = [int(w * 0.15), head_y1, int(w * 0.85), min(h - 10, head_y2 + int(h * 0.45))]
+        detections.append({"bbox": person_box, "label": "person", "conf": 0.96})
+
+        # Head / Helmet Bounding Box:
         head_box = [head_x1, head_y1, head_x2, head_y2]
         if is_helmet:
             detections.append({"bbox": head_box, "label": "hardhat", "conf": conf})
         else:
-            # Rejects baseball caps (caps do not wrap ears/sides) and bare hair!
             detections.append({"bbox": head_box, "label": "no_hardhat", "conf": 0.95})
 
         # -------------------------------------------------------------
-        # 3. SAFETY VEST DISCRIMINATION
+        # 3. SAFETY VEST DISCRIMINATION (Directly below the head)
         # -------------------------------------------------------------
-        hsv_torso = cv2.cvtColor(torso_crop, cv2.COLOR_BGR2HSV)
-        mask_neon = cv2.inRange(hsv_torso, np.array([22, 90, 90]), np.array([50, 255, 255]))
-        mask_orange = cv2.inRange(hsv_torso, np.array([5, 120, 110]), np.array([20, 255, 255]))
-        vest_pixels = cv2.countNonZero(mask_neon) + cv2.countNonZero(mask_orange)
-        vest_ratio = vest_pixels / torso_total
+        torso_y1 = head_y2 - int(h * 0.04)
+        torso_y2 = min(h - 10, head_y2 + int(h * 0.45))
+        torso_x1 = int(w * 0.16)
+        torso_x2 = int(w * 0.84)
 
-        torso_box = [torso_x1, torso_y1, torso_x2, torso_y2]
-        if vest_ratio > 0.09:
-            detections.append({"bbox": torso_box, "label": "vest", "conf": round(min(0.98, 0.78 + vest_ratio), 2)})
-        else:
-            detections.append({"bbox": torso_box, "label": "no_vest", "conf": 0.94})
+        torso_crop = frame[torso_y1:torso_y2, torso_x1:torso_x2]
+        if torso_crop.shape[0] > 20 and torso_crop.shape[1] > 20:
+            hsv_torso = cv2.cvtColor(torso_crop, cv2.COLOR_BGR2HSV)
+            torso_total = max(1, torso_crop.shape[0] * torso_crop.shape[1])
+
+            mask_neon = cv2.inRange(hsv_torso, np.array([22, 90, 90]), np.array([50, 255, 255]))
+            mask_orange = cv2.inRange(hsv_torso, np.array([5, 120, 110]), np.array([20, 255, 255]))
+            vest_pixels = cv2.countNonZero(mask_neon) + cv2.countNonZero(mask_orange)
+            vest_ratio = vest_pixels / torso_total
+
+            torso_box = [torso_x1, torso_y1, torso_x2, torso_y2]
+            if vest_ratio > 0.08:
+                detections.append({"bbox": torso_box, "label": "vest", "conf": round(min(0.98, 0.78 + vest_ratio), 2)})
+            else:
+                detections.append({"bbox": torso_box, "label": "no_vest", "conf": 0.94})
 
         return detections
 
@@ -291,6 +297,8 @@ class VisionEngine:
                 "alert_key": "HALTED",
                 "is_locked": True,
                 "is_halted": True,
+                "helmet_detected": False,
+                "vest_detected": False,
                 "stats": self.daily_stats
             }
 
@@ -300,7 +308,13 @@ class VisionEngine:
             cv2.putText(frame, f"SAFESITE AI | WORKER #{self.worker_id_counter} SCAN COMPLETED (LOCKED)", (20, 30),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.6, (0, 240, 255), 2)
 
-            color = (0, 255, 0) if self.current_alert_key == "CLEARED" else (0, 0, 255)
+            if self.current_alert_key == "CLEARED":
+                color = (0, 255, 0)
+            elif self.current_alert_key == "VEST_MISSING":
+                color = (0, 165, 255)
+            else:
+                color = (0, 0, 255)
+
             cv2.rectangle(frame, (0, h - 55), (w, h), (15, 15, 25), -1)
             cv2.putText(frame, self.current_state_text, (20, h - 20),
                         cv2.FONT_HERSHEY_SIMPLEX, 0.65, color, 2)
@@ -328,11 +342,10 @@ class VisionEngine:
             x1, y1, x2, y2 = bbox
 
             center_x = int((x1 + x2) / 2)
-            center_y = int((y1 + y2) / 2)
 
             if label == "person":
                 person_in_frame = True
-                if (w * 0.15) <= center_x <= (w * 0.85) and (y2 - y1) > (h * 0.35):
+                if (w * 0.15) <= center_x <= (w * 0.85):
                     person_centered = True
 
             if label in ["hardhat", "helmet"]:
@@ -361,13 +374,7 @@ class VisionEngine:
         self.helmet_detected = helmet_detected
         self.vest_detected = vest_detected
 
-        # 4. Target Head Guide Box (shows worker where to position head)
-        head_box_x1, head_box_y1 = int(w * 0.25), int(h * 0.08)
-        head_box_x2, head_box_y2 = int(w * 0.75), int(h * 0.44)
-        box_border_color = (0, 255, 0) if helmet_detected else ((0, 0, 255) if person_in_frame else (0, 240, 255))
-        cv2.rectangle(frame, (head_box_x1, head_box_y1), (head_box_x2, head_box_y2), box_border_color, 1)
-
-        # 5. Hold Stabilization Timer Logic (Only counts down when person is in camera view)
+        # 4. Hold Stabilization Timer Logic (Only counts down when person is in camera view)
         if person_in_frame and person_centered:
             if self.person_first_seen_time is None:
                 self.person_first_seen_time = now
@@ -427,6 +434,8 @@ class VisionEngine:
             self.current_alert_key = "WAITING"
             self.current_state_text = f"👤 PLEASE POSITION HEAD IN CAMERA VIEW (WORKER #{self.worker_id_counter})"
             color = (0, 240, 255)
+            # Alignment guide when waiting
+            cv2.rectangle(frame, (int(w * 0.22), int(h * 0.12)), (int(w * 0.78), int(h * 0.88)), (0, 240, 255), 1)
 
         # Draw Top Header Banner
         cv2.rectangle(frame, (0, 0), (w, 45), (15, 15, 25), -1)

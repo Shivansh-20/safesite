@@ -20,26 +20,21 @@ function toggleHalt() {
             const haltedOverlay = document.getElementById('halted-overlay');
             
             if (isHalted) {
-                btn.innerText = "▶ RESUME SYSTEM";
-                btn.classList.add('active');
-                haltedOverlay.classList.add('visible');
-                videoStream.src = ""; // Clear image stream to release webcam HTTP connection
+                if (btn) { btn.innerText = "▶ RESUME SYSTEM"; btn.classList.add('active'); }
+                if (haltedOverlay) haltedOverlay.classList.add('visible');
                 audioPlayer.pause();
                 audioPlayer.currentTime = 0;
             } else {
-                btn.innerText = "⏹ HALT / STOP SYSTEM";
-                btn.classList.remove('active');
-                haltedOverlay.classList.remove('visible');
-                // Reconnect video stream smoothly
-                setTimeout(() => {
-                    videoStream.src = "/video_feed?t=" + new Date().getTime();
-                }, 150);
+                if (btn) { btn.innerText = "⏹ HALT / STOP SYSTEM"; btn.classList.remove('active'); }
+                if (haltedOverlay) haltedOverlay.classList.remove('visible');
+                // Re-kick stream if browser stopped it
+                videoStream.src = "/video_feed?t=" + new Date().getTime();
             }
             fetchStatus();
         })
         .catch(err => console.error("Halt toggle error:", err))
         .finally(() => {
-            setTimeout(() => { isHaltToggling = false; }, 500);
+            setTimeout(() => { isHaltToggling = false; }, 400);
         });
 }
 
@@ -268,35 +263,56 @@ function forceMissing() {
         .catch(err => console.error("Override missing error:", err));
 }
 
-// Global Robust Presenter Hotkeys:
-// Press 'C' or '2' -> Force Clear (Shift Cleared)
-// Press 'M' or '1' -> Force Missing Gear (Red warning + pamphlet)
-// Press 'R'        -> Re-Scan current worker
-// Press 'N'        -> Next worker in line
-// Press 'H'        -> Halt / Resume system
+// =============================================================================
+// PRESENTER SECRET HOTKEYS (TRICK C)
+// =============================================================================
+let lastHotkeyTime = 0;
+
 function handleHotkey(e) {
-    if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
-    if (e.repeat) return; // Prevent rapid-fire toggling when key is held down
+    if (e.target && (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA')) return;
+    if (e.repeat) return; // Ignore hold key repeat
 
-    const key = e.key ? e.key.toLowerCase() : '';
-    console.log("SafeSite Key Captured:", key);
+    const now = Date.now();
+    if (now - lastHotkeyTime < 350) return; // 350ms debounce
 
-    if (key === 'c' || key === '2') {
+    const key = (e.key || '').toLowerCase();
+    const code = e.code || '';
+
+    // 'C' or '2' -> Force Clear (Shift Cleared)
+    if (key === 'c' || key === '2' || code === 'KeyC' || code === 'Digit2' || code === 'Numpad2') {
+        lastHotkeyTime = now;
+        console.log("SafeSite Hotkey: FORCE CLEAR");
         forceClear();
-    } else if (key === 'm' || key === '1') {
+    }
+    // 'M' or '1' -> Force Missing Gear
+    else if (key === 'm' || key === '1' || code === 'KeyM' || code === 'Digit1' || code === 'Numpad1') {
+        lastHotkeyTime = now;
+        console.log("SafeSite Hotkey: FORCE MISSING");
         forceMissing();
-    } else if (key === 'r') {
+    }
+    // 'R' -> Re-Scan current worker
+    else if (key === 'r' || code === 'KeyR') {
+        lastHotkeyTime = now;
+        console.log("SafeSite Hotkey: RESCAN");
         rescanWorker();
-    } else if (key === 'n') {
+    }
+    // 'N' -> Next worker in line
+    else if (key === 'n' || code === 'KeyN') {
+        lastHotkeyTime = now;
+        console.log("SafeSite Hotkey: NEXT WORKER");
         nextWorker();
-    } else if (key === 'h' || key === ' ') {
+    }
+    // 'H' -> Halt / Resume system
+    else if (key === 'h' || code === 'KeyH') {
+        lastHotkeyTime = now;
         e.preventDefault();
+        console.log("SafeSite Hotkey: HALT TOGGLE");
         toggleHalt();
     }
 }
 
-document.addEventListener('keydown', handleHotkey, true);
-window.addEventListener('keydown', handleHotkey, true);
+// Single robust listener on window
+window.addEventListener('keydown', handleHotkey, false);
 
 setInterval(fetchStatus, 1500);
 fetchStatus();
