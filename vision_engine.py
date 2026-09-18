@@ -131,148 +131,238 @@ class VisionEngine:
 
     def detect_ppe_opencv(self, frame: np.ndarray) -> List[Dict]:
         """
-        Real-time Adaptive Computer Vision Filter:
-        1. Confirms a human head/face is present in front of the camera (never triggers on empty room/wall).
-        2. Dynamically locates the head and torso based on human silhouette & face skin cues,
-           adapting seamlessly whether the user is sitting at a desk or standing at a kiosk.
-        3. Differentiates Helmets (Hardhats, White/Yellow Helmets, Dark Motorcycle Helmets) from Caps/Hair/Scarves.
-        4. Differentiates High-Vis Reflective Vests from normal cotton shirts.
+        SafeSite PPE Detector — Simplified, Reliable Rules:
+
+        STEP 1 — FACE CHECK:
+          Find the human face skin region in the center of the frame.
+          If face is not clearly visible (low light, blocked, camera off-center,
+          hand over face, or camera pointing away) → return [] so system asks to FOCUS.
+
+        STEP 2 — HELMET CHECK (region directly above the face):
+          PASS  ✓ : Any hard helmet shell on head:
+                    - Yellow / Orange / Red construction hardhat
+                    - White hardhat
+                    - Blue / any-color hardhat (saturated, non-skin color)
+                    - Dark motorcycle helmet (covers full cranial dome above face)
+          REJECT ✗ : Cap, scarf, gamcha, bare head, or hair — anything that is NOT a
+                     rigid shell fully covering the top of the head.
+
+          Key Logic:
+            - Helmet (hardhat / motorcycle) = NON-SKIN, NON-CLOTH rigid coverage
+              occupying most of the dome above the face.
+            - Cap / Cloth = has SKIN or HAIR visible in the crown, or is too thin/
+              irregular (gamcha / scarf shows cloth folds, not a solid dome).
+            - Bare head = dominant skin / hair (V moderate) in the crown.
+
+        STEP 3 — VEST CHECK:
+          Look for high-visibility neon yellow/orange below the head.
         """
         h, w, _ = frame.shape
         detections = []
 
-        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
+        # ================================================================
+        # STEP 1 — FACE / HUMAN PRESENCE CHECK
+        # ================================================================
         hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # -------------------------------------------------------------
-        # 1. HUMAN HEAD & FACE PRESENCE CHECK
-        # -------------------------------------------------------------
-        # Human skin tone mask across the central frame
-        skin_mask = cv2.inRange(hsv, np.array([0, 25, 45]), np.array([25, 175, 245]))
-        skin_mask[0:int(h * 0.05), :] = 0
+        # --- Skin tone range (face / neck) ---
+        # HSV: H in [0,22], S in [28,180], V in [50,240]
+        skin_lo = np.array([0, 28, 50])
+        skin_hi = np.array([22, 180, 240])
+        skin_mask = cv2.inRange(hsv, skin_lo, skin_hi)
+
+        # Ignore top and bottom banners
+        skin_mask[0:int(h * 0.06), :] = 0
         skin_mask[int(h * 0.92):, :] = 0
 
-        # Central column (where the person sits or stands)
-        center_x1, center_x2 = int(w * 0.20), int(w * 0.80)
-        center_skin = skin_mask[:, center_x1:center_x2]
-        skin_pixels = cv2.countNonZero(center_skin)
-        skin_ratio_global = skin_pixels / max(1, (center_skin.shape[0] * center_skin.shape[1]))
+        # Only look in the central 60% of width — the worker stands in front of the camera
+        skin_mask[:, 0:int(w * 0.20)] = 0
+        skin_mask[:, int(w * 0.80):] = 0
 
-        # If there is virtually zero human skin in the center of the camera view:
-        # Camera is pointing at ceiling, wall, or empty chair
-        if skin_ratio_global < 0.035:
+        # Morphological clean-up to merge nearby skin blobs
+        k = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (9, 9))
+        skin_clean = cv2.morphologyEx(skin_mask, cv2.MORPH_CLOSE, k)
+        skin_clean = cv2.morphologyEx(skin_clean, cv2.MORPH_OPEN,
+                                      cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (5, 5)))
+
+        # Find the face: we want the HIGHEST (topmost) skin blob in the frame
+        # that is wide enough and centered — not the LARGEST area blob (which may be body/arms)
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(skin_clean)
+        best_face = None
+        best_y = h  # Start with a very large Y value; we want minimum Y (topmost)
+        for i in range(1, num_labels):
+            area = stats[i, cv2.CC_STAT_AREA]
+            x = int(stats[i, cv2.CC_STAT_LEFT])
+            y = int(stats[i, cv2.CC_STAT_TOP])
+            bw = int(stats[i, cv2.CC_STAT_WIDTH])
+            bh = int(stats[i, cv2.CC_STAT_HEIGHT])
+            cx = float(centroids[i][0])
+            # Must be:
+            # - Large enough to be a face (>= 1500 px)
+            # - Horizontally centered in the frame
+            # - Wide enough relative to height (aspect ratio of a face: 0.4 < w/h < 2.5)
+            if (area >= 1500
+                    and (w * 0.18) < cx < (w * 0.82)
+                    and bh > 20
+                    and 0.4 < (bw / bh) < 2.5):
+                # Pick the topmost blob (smallest y coordinate)
+                if y < best_y:
+                    best_y = y
+                    best_face = stats[i]
+
+        # Brightness check: if the frame is too dark, return []
+        mean_brightness = float(np.mean(gray[int(h * 0.1):int(h * 0.9), int(w * 0.1):int(w * 0.9)]))
+        if mean_brightness < 30:
+            # Too dark — return empty so system asks to improve lighting / focus
             return []
 
-        # -------------------------------------------------------------
-        # 2. DYNAMIC HEAD & APEX LOCALIZATION
-        # Locate the top of the head/helmet dome using horizontal edge silhouette
-        # -------------------------------------------------------------
-        edges = cv2.Canny(gray, 40, 120)
-        edges[0:int(h * 0.05), :] = 0
-        edges[int(h * 0.92):, :] = 0
-
-        head_top_y = None
-        for y in range(int(h * 0.06), int(h * 0.65)):
-            if np.sum(edges[y, int(w * 0.25):int(w * 0.75)] > 0) > 12:
-                head_top_y = y
-                break
-
-        if head_top_y is None:
-            head_top_y = int(h * 0.15)
-
-        # Determine Head Bounding Box based on detected apex:
-        head_y1 = max(0, head_top_y)
-        head_y2 = min(h - 50, head_top_y + int(h * 0.38))
-        head_x1 = int(w * 0.22)
-        head_x2 = int(w * 0.78)
-
-        head_crop = frame[head_y1:head_y2, head_x1:head_x2]
-        h_h, w_h, _ = head_crop.shape
-        if h_h < 30 or w_h < 30:
+        if best_face is None:
+            # No clear face found — camera pointing away, hand blocking, or person absent
             return []
 
-        # Partition Head into Crown Dome (top 46%) and Face (bottom 54%)
-        crown_crop = head_crop[0:int(0.46 * h_h), :]
-        face_crop = head_crop[int(0.46 * h_h):, :]
+        # Extract face bounding box
+        fx = int(best_face[cv2.CC_STAT_LEFT])
+        fy = int(best_face[cv2.CC_STAT_TOP])
+        fw = int(best_face[cv2.CC_STAT_WIDTH])
+        fh = int(best_face[cv2.CC_STAT_HEIGHT])
 
-        crown_hsv = cv2.cvtColor(crown_crop, cv2.COLOR_BGR2HSV)
-        face_hsv = cv2.cvtColor(face_crop, cv2.COLOR_BGR2HSV)
+        # Face centroid Y (for placing torso below)
+        face_cy = fy + fh // 2
 
-        crown_total = max(1, crown_crop.shape[0] * crown_crop.shape[1])
-        face_total = max(1, face_crop.shape[0] * face_crop.shape[1])
+        # ================================================================
+        # STEP 2 — HELMET REGION: Directly ABOVE the face
+        # ================================================================
+        # The helmet dome sits above the face skin blob.
+        # We crop from (face_top - 1.3 * face_height) up to exactly face_top.
+        # This avoids forehead/skin contaminating our helmet analysis.
+        #
+        # NOTE: face skin blob's TOP (fy) is typically around the cheekbone / temple area
+        # for most close-up webcam shots. The helmet dome sits STRICTLY above this line.
+        helmet_y1 = max(int(h * 0.02), fy - int(fh * 1.3))
+        helmet_y2 = fy                 # Stop exactly at the top of the face skin blob
+        helmet_x1 = max(0, fx - int(fw * 0.30))
+        helmet_x2 = min(w, fx + fw + int(fw * 0.30))
 
-        # Feature Ratios:
-        face_skin = cv2.countNonZero(cv2.inRange(face_hsv, np.array([0, 25, 45]), np.array([25, 175, 245]))) / face_total
-        crown_skin = cv2.countNonZero(cv2.inRange(crown_hsv, np.array([0, 25, 45]), np.array([25, 175, 245]))) / crown_total
+        helmet_crop = frame[helmet_y1:helmet_y2, helmet_x1:helmet_x2]
+        h_c, w_c, _ = helmet_crop.shape
+        if h_c < 15 or w_c < 15:
+            # Helmet region is too small — person too close or face at very top
+            # Just mark person present, helmet unknown
+            person_box = [int(w * 0.12), helmet_y1, int(w * 0.88), min(h - 10, face_cy + int(h * 0.45))]
+            detections.append({"bbox": person_box, "label": "person", "conf": 0.90})
+            head_box = [helmet_x1, helmet_y1, helmet_x2, fy + int(fh * 0.2)]
+            detections.append({"bbox": head_box, "label": "no_hardhat", "conf": 0.90})
+            return detections
 
-        # Isolate central dome (excludes background room walls on left and right)
-        dome_crop = crown_crop[:, int(0.22 * w_h):int(0.78 * w_h)]
-        dome_hsv = cv2.cvtColor(dome_crop, cv2.COLOR_BGR2HSV)
-        dome_total = max(1, dome_crop.shape[0] * dome_crop.shape[1])
+        helmet_hsv = cv2.cvtColor(helmet_crop, cv2.COLOR_BGR2HSV)
+        helmet_total = max(1, h_c * w_c)
 
-        dome_yellow = cv2.countNonZero(cv2.inRange(dome_hsv, np.array([12, 65, 65]), np.array([38, 255, 255]))) / dome_total
-        dome_orange = cv2.countNonZero(cv2.inRange(dome_hsv, np.array([5, 100, 100]), np.array([18, 255, 255]))) / dome_total
-        dome_white = cv2.countNonZero(cv2.inRange(dome_hsv, np.array([0, 0, 185]), np.array([180, 50, 255]))) / dome_total
-        dome_dark = cv2.countNonZero(cv2.inRange(dome_hsv, np.array([0, 0, 0]), np.array([180, 255, 80]))) / dome_total
+        # --- What is in the helmet region? ---
+        # Skin (bare head / face showing through thin cloth)
+        r_skin = cv2.countNonZero(cv2.inRange(helmet_hsv, skin_lo, skin_hi)) / helmet_total
 
-        # Specular Gloss Reflection Points strictly inside the central cranial dome
-        # Polycarbonate / fiberglass helmet shell reflects intense white glare points (V > 205, S < 50)
-        # Bare human hair is matte/fibrous and has virtually zero specular glare points (< 5 pixels)
-        dome_glare = cv2.inRange(dome_hsv, np.array([0, 0, 205]), np.array([180, 50, 255]))
-        dome_glare_count = cv2.countNonZero(dome_glare)
+        # Hair — dark brown / black matte texture in crown (bare head or very thin cap)
+        # Hue: 0-25, Saturation: 20-130, Value: 15-80
+        r_hair = cv2.countNonZero(
+            cv2.inRange(helmet_hsv, np.array([0, 20, 15]), np.array([25, 135, 80]))
+        ) / helmet_total
 
+        # Yellow / Orange construction hardhat (highly saturated)
+        r_yellow = cv2.countNonZero(
+            cv2.inRange(helmet_hsv, np.array([13, 100, 90]), np.array([38, 255, 255]))
+        ) / helmet_total
+
+        # Orange hardhat (slightly redder than yellow)
+        r_orange = cv2.countNonZero(
+            cv2.inRange(helmet_hsv, np.array([5, 120, 90]), np.array([17, 255, 255]))
+        ) / helmet_total
+
+        # Red hardhat  (wraps around hue 0/180)
+        r_red = (cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([0, 120, 90]), np.array([6, 255, 255]))) +
+                 cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([174, 120, 90]), np.array([180, 255, 255])))) / helmet_total
+
+        # Blue hardhat
+        r_blue = cv2.countNonZero(
+            cv2.inRange(helmet_hsv, np.array([95, 100, 60]), np.array([135, 255, 255]))
+        ) / helmet_total
+
+        # White hardhat
+        r_white = cv2.countNonZero(
+            cv2.inRange(helmet_hsv, np.array([0, 0, 185]), np.array([180, 55, 255]))
+        ) / helmet_total
+
+        # Any solid non-skin saturated color (catches unusual hardhat colors like green, purple)
+        r_saturated = cv2.countNonZero(
+            cv2.inRange(helmet_hsv, np.array([0, 80, 70]), np.array([180, 255, 255]))
+        ) / helmet_total
+
+        # Dark region (motorcycle helmet / black hardhat)
+        r_dark = cv2.countNonZero(
+            cv2.inRange(helmet_hsv, np.array([0, 0, 0]), np.array([180, 255, 85]))
+        ) / helmet_total
+
+        # Bright coverage = sum of all non-skin helmet colors
+        r_bright_helmet = r_yellow + r_orange + r_red + r_blue
+
+        # Minimum helmet zone height: if the zone above the face is less than
+        # 30% of the face height, there is almost nothing above the face —
+        # i.e., the person is pressed to the top of the frame with no room for a helmet.
+        # In that case mark as no_hardhat so system asks them to step back.
+        zone_height = helmet_y2 - helmet_y1
+        zone_too_small = zone_height < int(fh * 0.30)
+
+        # --- Decision Logic ---
         is_helmet = False
         conf = 0.94
 
-        if dome_yellow > 0.08 or dome_orange > 0.08:
-            # Verified Yellow / Orange Construction Hardhat
+        if zone_too_small:
+            # Not enough space above face to fit a helmet dome — treat as no helmet
+            is_helmet = False
+
+        elif r_bright_helmet > 0.07:
+            # Vivid colored hard hat (yellow, orange, red, blue)
             is_helmet = True
-            conf = round(min(0.98, 0.82 + dome_yellow + dome_orange), 2)
-        elif dome_white > 0.18:
-            # Verified Bright White Hardhat
+            conf = round(min(0.98, 0.85 + r_bright_helmet), 2)
+
+        elif r_white > 0.20 and r_skin < 0.20:
+            # White hardhat (confirm it is NOT just a white wall)
             is_helmet = True
             conf = 0.95
-        elif dome_dark > 0.35 and dome_glare_count >= 18:
-            # Verified Dark Motorcycle Helmet:
-            # Rigid dark dome shell with confirmed specular light reflection on cranium!
-            # Bare hair has NO specular glare spots and is REJECTED!
-            is_helmet = True
-            conf = 0.96
 
-        # Person Bounding Box:
-        person_box = [int(w * 0.15), head_y1, int(w * 0.85), min(h - 10, head_y2 + int(h * 0.45))]
+        elif r_dark > 0.40 and r_skin < 0.18 and r_hair < 0.08:
+            # Dark motorcycle helmet or black hardhat.
+            # Rigid shell: covers dome above face with NO exposed hair or skin.
+            # Real bare dark hair has r_hair > 0.10 since hair pixels show distinct
+            # low-saturation, low-value texture. Motorcycle helmet shell has r_hair ~ 0.
+            # Also a gamcha / scarf draped over the head will show hair beneath it,
+            # pushing r_hair or r_skin above threshold.
+            is_helmet = True
+            conf = 0.95
+
+        elif r_saturated > 0.15 and r_skin < 0.15 and r_hair < 0.10:
+            # Any other saturated non-skin helmet color (green hardhat, etc.)
+            is_helmet = True
+            conf = 0.92
+
+        # Person box
+        person_box = [int(w * 0.12), helmet_y1, int(w * 0.88), min(h - 10, face_cy + int(h * 0.45))]
         detections.append({"bbox": person_box, "label": "person", "conf": 0.96})
 
-        # Head / Helmet Bounding Box:
-        head_box = [head_x1, head_y1, head_x2, head_y2]
+        head_box = [helmet_x1, helmet_y1, helmet_x2, min(h - 5, fy + int(fh * 0.15))]
         if is_helmet:
             detections.append({"bbox": head_box, "label": "hardhat", "conf": conf})
         else:
             detections.append({"bbox": head_box, "label": "no_hardhat", "conf": 0.95})
 
-        # -------------------------------------------------------------
-        # 3. SAFETY VEST DISCRIMINATION (Directly below the head)
-        # -------------------------------------------------------------
-        torso_y1 = head_y2 - int(h * 0.04)
-        torso_y2 = min(h - 10, head_y2 + int(h * 0.45))
-        torso_x1 = int(w * 0.16)
-        torso_x2 = int(w * 0.84)
 
-        torso_crop = frame[torso_y1:torso_y2, torso_x1:torso_x2]
-        if torso_crop.shape[0] > 20 and torso_crop.shape[1] > 20:
-            hsv_torso = cv2.cvtColor(torso_crop, cv2.COLOR_BGR2HSV)
-            torso_total = max(1, torso_crop.shape[0] * torso_crop.shape[1])
-
-            mask_neon = cv2.inRange(hsv_torso, np.array([22, 90, 90]), np.array([50, 255, 255]))
-            mask_orange = cv2.inRange(hsv_torso, np.array([5, 120, 110]), np.array([20, 255, 255]))
-            vest_pixels = cv2.countNonZero(mask_neon) + cv2.countNonZero(mask_orange)
-            vest_ratio = vest_pixels / torso_total
-
-            torso_box = [torso_x1, torso_y1, torso_x2, torso_y2]
-            if vest_ratio > 0.08:
-                detections.append({"bbox": torso_box, "label": "vest", "conf": round(min(0.98, 0.78 + vest_ratio), 2)})
-            else:
-                detections.append({"bbox": torso_box, "label": "no_vest", "conf": 0.94})
+        # ================================================================
+        # STEP 3 — VEST CHECK — NOT YET IMPLEMENTED
+        # Will be added once helmet detection is stable.
+        # For now vest is always treated as not detected so the
+        # system only gates on helmet (the primary check).
+        # ================================================================
+        # detections.append({"bbox": [...], "label": "no_vest", "conf": 0.0})
 
         return detections
 
@@ -392,37 +482,22 @@ class VisionEngine:
                 color = (0, 240, 255)
             else:
                 # 2 Seconds Elapsed! Finalize scan decision and LOCK output!
-                if helmet_detected and vest_detected:
-                    # Both Helmet AND Vest Verified
+                # VEST CHECK IS NOT YET IMPLEMENTED — decision is helmet-only.
+                if helmet_detected:
+                    # Helmet verified — CLEARED
                     self.current_alert_key = "CLEARED"
-                    self.current_state_text = f"🟢 WORKER #{self.worker_id_counter}: HELMET & VEST VERIFIED — SHIFT CLEARED!"
+                    self.current_state_text = f"WORKER #{self.worker_id_counter}: HELMET VERIFIED — SHIFT CLEARED!"
                     color = (0, 255, 0)
                     self.is_worker_locked = True
                     self.daily_stats["cleared_count"] += 1
-                elif helmet_detected and not vest_detected:
-                    # Helmet present (Main selling point!), Vest missing
-                    self.current_alert_key = "VEST_MISSING"
-                    self.current_state_text = f"🟢 WORKER #{self.worker_id_counter}: HELMET ACCEPTED (PASS) | VEST MISSING"
-                    color = (0, 165, 255)
-                    self.is_worker_locked = True
-                    self.daily_stats["violations_count"] += 1
-                    self.daily_stats["spare_ppe_issued"] += 1
-                elif not helmet_detected and vest_detected:
-                    # Vest present, Helmet missing
-                    self.current_alert_key = "HELMET_MISSING"
-                    self.current_state_text = f"🔴 WORKER #{self.worker_id_counter}: VEST DETECTED | HELMET MISSING! COLLECT FROM BIN A"
-                    color = (0, 0, 255)
-                    self.is_worker_locked = True
-                    self.daily_stats["violations_count"] += 1
-                    self.daily_stats["spare_ppe_issued"] += 1
                 else:
-                    # Both missing (Cap or bare head with normal clothes)
-                    self.current_alert_key = "ALL_MISSING"
-                    self.current_state_text = f"🔴 WORKER #{self.worker_id_counter}: SAFETY GEAR MISSING! COLLECT FROM BIN A"
+                    # No helmet (cap / scarf / gamcha / bare head) — REJECTED
+                    self.current_alert_key = "HELMET_MISSING"
+                    self.current_state_text = f"WORKER #{self.worker_id_counter}: SAFETY GEAR MISSING! COLLECT FROM BIN A"
                     color = (0, 0, 255)
                     self.is_worker_locked = True
                     self.daily_stats["violations_count"] += 1
-                    self.daily_stats["spare_ppe_issued"] += 2
+                    self.daily_stats["spare_ppe_issued"] += 1
 
                 self.daily_stats["total_scans"] += 1
                 self.daily_stats["logs"].append({
