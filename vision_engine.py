@@ -185,27 +185,29 @@ class VisionEngine:
             cx = centroids[i][0]
             cy = centroids[i][1]
 
-            # Face blob should be reasonably large, centered, and not stuck on the ceiling
+            # Face blob should be reasonably large, centered, and positioned in normal view
             if area > 1800 and (w * 0.18) < cx < (w * 0.82) and y > int(h * 0.10):
                 if area > max_area:
                     max_area = area
-                    best_face = (x, y, bw, bh)
+                    best_face = (x, y, bw, bh, cx, cy)
 
         # If no face found in valid range, return [] -> prompts to position head
         if best_face is None:
             return []
 
-        fx, fy, fw, fh = best_face
-        # Centroid X for tight head bounding box (prevents wide torso/shoulder skin from stretching crop into background walls)
-        cx = int(fx + fw / 2)
-        head_w = min(int(w * 0.36), max(int(w * 0.28), fw))
-        head_x1 = max(0, int(cx - head_w / 2))
-        head_x2 = min(w, int(cx + head_w / 2))
+        fx, fy, fw, fh, fcx, fcy = best_face
 
-        # 3. Helmet sits on and directly above the face (crown height is ~50-55% of face height)
-        # Using 0.55*fh ensures we only examine the worker's head and never high background doors/walls
-        head_top_y = max(int(h * 0.04), fy - int(fh * 0.55))
-        head_bottom_y = min(h - 10, fy + int(fh * 0.08))
+        # 3. HELMET CROWN ZONE: STRICTLY ABOVE EYES & NOSE
+        # Centered directly on the face center axis (fcx = nose/mid-eyes)
+        # Using 24% frame width prevents side wall lights / ceiling glare from bleeding into the crop
+        head_w = int(w * 0.24)
+        head_x1 = max(0, int(fcx - head_w / 2))
+        head_x2 = min(w, int(fcx + head_w / 2))
+
+        # Vertical: from just above eyes/brow (fy) upward by 85% of head_w
+        # This isolates only the inches directly above the eyes where the helmet sits
+        head_top_y = max(int(h * 0.04), fy - int(head_w * 0.85))
+        head_bottom_y = min(h - 10, fy + int(head_w * 0.08))
 
         helmet_crop = frame[head_top_y:head_bottom_y, head_x1:head_x2]
         ch, cw, _ = helmet_crop.shape
@@ -223,19 +225,19 @@ class VisionEngine:
         r_skin = cv2.countNonZero(cv2.inRange(helmet_hsv, skin_lo, skin_hi)) / helmet_total
         r_hair = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([0, 15, 10]), np.array([25, 130, 80]))) / helmet_total
 
-        # Colored hardhats have high saturation (S >= 120) so skin tones (S < 110) never trigger them
+        # Colored hardhats have high saturation (S >= 110)
         r_yellow = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([13, 110, 90]), np.array([38, 255, 255]))) / helmet_total
         r_orange = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([5, 120, 90]), np.array([17, 255, 255]))) / helmet_total
         r_red = (cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([0, 140, 90]), np.array([6, 255, 255]))) +
                  cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([174, 140, 90]), np.array([180, 255, 255])))) / helmet_total
         r_blue = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([95, 90, 60]), np.array([135, 255, 255]))) / helmet_total
         r_white = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([0, 0, 185]), np.array([180, 50, 255]))) / helmet_total
-        r_dark = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([0, 0, 0]), np.array([180, 255, 95]))) / helmet_total
+        r_dark = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([0, 0, 0]), np.array([180, 255, 100]))) / helmet_total
         r_vivid = r_yellow + r_orange + r_red + r_blue
 
         # Specular gloss / reflection on hard shell surface (polycarbonate/gloss)
         # Helmets reflect bright specular light points; dark hair and cotton cloth wraps do not!
-        glare_px = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([0, 0, 195]), np.array([180, 55, 255])))
+        glare_px = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([0, 0, 190]), np.array([180, 55, 255])))
 
         is_helmet = False
         conf = 0.94
@@ -248,7 +250,7 @@ class VisionEngine:
             # White Hardhat
             is_helmet = True
             conf = 0.95
-        elif r_dark > 0.40 and r_skin < 0.25 and glare_px >= 8:
+        elif (r_dark > 0.35 and r_skin < 0.25 and glare_px >= 8):
             # Dark motorcycle helmet or black helmet shell:
             # Rigid dome with confirmed specular light reflection spots on the shell.
             # Matte dark hair, cloth wrap (gamcha), and cotton caps have NO specular reflection!
@@ -259,7 +261,7 @@ class VisionEngine:
         person_box = [int(w * 0.12), head_top_y, int(w * 0.88), min(h - 10, fy + fh + int(h * 0.15))]
         detections.append({"bbox": person_box, "label": "person", "conf": 0.96})
 
-        # Head / Helmet box
+        # Head / Helmet box (centered tight above eyes and nose)
         head_box = [head_x1, head_top_y, head_x2, head_bottom_y]
         if is_helmet:
             detections.append({"bbox": head_box, "label": "hardhat", "conf": conf})
