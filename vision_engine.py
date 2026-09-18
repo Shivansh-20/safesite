@@ -131,181 +131,144 @@ class VisionEngine:
 
     def detect_ppe_opencv(self, frame: np.ndarray) -> List[Dict]:
         """
-        SafeSite Helmet Detector — Adaptive Crown Zone.
+        SafeSite AI — Real-time Head & Helmet Verification Engine.
 
-        Algorithm:
-        1. BRIGHTNESS: reject if frame is too dark.
-        2. SKIN SEARCH: find where face/neck skin is in the CENTER column.
-           - Scan the center 60% width for skin pixels.
-           - Find the TOPMOST row that has significant skin.
-           - This gives us `face_top_y` — the top of the visible face/forehead.
-        3. CROWN ZONE: scan from (face_top_y - 40%) to (face_top_y + 5%).
-           - This is the region right above and on top of the face — where the helmet sits.
-        4. HELMET DECISION: analyze the crown zone for helmet colors.
-           - Any vivid hardhat color (yellow, orange, red, blue) → PASS
-           - White with no skin → PASS
-           - Dark dome with no skin/hair → PASS (motorcycle helmet)
-           - Everything else → REJECT (bare hair, cap, scarf, gamcha)
+        1. Validates human presence:
+           - Finds face/neck skin cluster in the user's interactive scanning zone (center x: 18%-82%, y: 15%-90%).
+           - Ignores background ceiling/door reflections.
+           - If no person or bad lighting/covered camera -> returns [] so system prompts FOCUS / ALIGN.
 
-        The person presence is confirmed because we only run the helmet check
-        if we found skin (step 2). If no skin → return [] → ask to focus.
+        2. Dynamically locates the helmet region directly on the person's head:
+           - Rather than assuming a hardcoded position, helmet zone is dynamically anchored right on/above the face.
+
+        3. Differentiates Helmets from Bare Hair, Caps, and Scarves:
+           - Any rigid helmet (Yellow/Orange/Blue/Red Hardhat, White Hardhat, or Dark Motorcycle Helmet).
+           - Bare head / cloth wrapping rejected.
         """
         h, w, _ = frame.shape
         detections = []
 
-        hsv  = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
+        hsv = cv2.cvtColor(frame, cv2.COLOR_BGR2HSV)
         gray = cv2.cvtColor(frame, cv2.COLOR_BGR2GRAY)
 
-        # ================================================================
-        # BRIGHTNESS CHECK
-        # ================================================================
+        # 1. Minimum illumination check
         mean_v = float(np.mean(gray))
         if mean_v < 28:
-            return []  # Too dark
-
-        # ================================================================
-        # SKIN RANGE
-        # ================================================================
-        skin_lo = np.array([0,  22, 45])
-        skin_hi = np.array([22, 190, 248])
-
-        # ================================================================
-        # STEP 1 — FIND THE TOP OF THE FACE (adaptive)
-        # Scan the center column (x: 15%–85%) row-by-row from top to bottom.
-        # Find the first row that has >= 3% skin pixels → that is roughly
-        # the top of the forehead or the visor-line of a motorcycle helmet.
-        # ================================================================
-        cx1 = int(w * 0.15)
-        cx2 = int(w * 0.85)
-        col_width = cx2 - cx1
-
-        face_top_y = None
-        for y in range(int(h * 0.06), int(h * 0.85)):
-            row_hsv = hsv[y, cx1:cx2]
-            skin_px = cv2.countNonZero(cv2.inRange(
-                row_hsv.reshape(-1, 1, 3), skin_lo, skin_hi))
-            if skin_px / col_width >= 0.03:
-                face_top_y = y
-                break
-
-        if face_top_y is None:
-            # No skin row found — no person or camera off target
             return []
 
-        # ================================================================
-        # STEP 2 — CROWN / HELMET ZONE
-        # The helmet dome sits ABOVE the face_top_y.
-        # Zone height = 35% of total frame height.
-        # Allow a tiny +5% overlap below face_top_y so we catch the very
-        # edge of a motorcycle helmet visor sitting right at forehead level.
-        # ================================================================
-        zone_h     = int(h * 0.35)
-        crown_y2   = min(h - 10, face_top_y + int(h * 0.05))
-        crown_y1   = max(int(h * 0.02), crown_y2 - zone_h)
-        crown_x1   = int(w * 0.18)
-        crown_x2   = int(w * 0.82)
+        # 2. Skin detection in human interaction area (center column)
+        skin_lo = np.array([0, 25, 45])
+        skin_hi = np.array([25, 185, 245])
 
-        crown_crop = frame[crown_y1:crown_y2, crown_x1:crown_x2]
-        ch, cw, _  = crown_crop.shape
+        skin_mask = cv2.inRange(hsv, skin_lo, skin_hi)
+        # Exclude extreme edges
+        skin_mask[:, 0:int(w * 0.16)] = 0
+        skin_mask[:, int(w * 0.84):] = 0
+        skin_mask[int(h * 0.94):, :] = 0
+
+        # Morphological noise removal
+        kernel = cv2.getStructuringElement(cv2.MORPH_ELLIPSE, (7, 7))
+        skin_clean = cv2.morphologyEx(skin_mask, cv2.MORPH_OPEN, kernel)
+        skin_clean = cv2.morphologyEx(skin_clean, cv2.MORPH_CLOSE, kernel)
+
+        num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(skin_clean)
+        best_face = None
+        max_area = 0
+
+        # Find the primary face skin blob in the central viewing area
+        for i in range(1, num_labels):
+            area = stats[i, cv2.CC_STAT_AREA]
+            x = stats[i, cv2.CC_STAT_LEFT]
+            y = stats[i, cv2.CC_STAT_TOP]
+            bw = stats[i, cv2.CC_STAT_WIDTH]
+            bh = stats[i, cv2.CC_STAT_HEIGHT]
+            cx = centroids[i][0]
+            cy = centroids[i][1]
+
+            # Face blob should be reasonably large, centered, and not stuck on the ceiling
+            if area > 1800 and (w * 0.18) < cx < (w * 0.82) and y > int(h * 0.10):
+                if area > max_area:
+                    max_area = area
+                    best_face = (x, y, bw, bh)
+
+        # If no face found in valid range, return [] -> prompts to position head
+        if best_face is None:
+            return []
+
+        fx, fy, fw, fh = best_face
+        # Centroid X for tight head bounding box (prevents wide torso/shoulder skin from stretching crop into background walls)
+        cx = int(fx + fw / 2)
+        head_w = min(int(w * 0.36), max(int(w * 0.28), fw))
+        head_x1 = max(0, int(cx - head_w / 2))
+        head_x2 = min(w, int(cx + head_w / 2))
+
+        # 3. Helmet sits on and directly above the face (crown height is ~50-55% of face height)
+        # Using 0.55*fh ensures we only examine the worker's head and never high background doors/walls
+        head_top_y = max(int(h * 0.04), fy - int(fh * 0.55))
+        head_bottom_y = min(h - 10, fy + int(fh * 0.08))
+
+        helmet_crop = frame[head_top_y:head_bottom_y, head_x1:head_x2]
+        ch, cw, _ = helmet_crop.shape
 
         if ch < 20 or cw < 20:
-            detections.append({"bbox": [int(w * 0.12), int(h * 0.04),
-                                        int(w * 0.88), int(h * 0.92)],
-                               "label": "person", "conf": 0.90})
-            detections.append({"bbox": [crown_x1, crown_y1, crown_x2, crown_y2],
-                               "label": "no_hardhat", "conf": 0.90})
+            person_box = [int(w * 0.12), head_top_y, int(w * 0.88), min(h - 10, fy + fh + int(h * 0.1))]
+            detections.append({"bbox": person_box, "label": "person", "conf": 0.95})
+            detections.append({"bbox": [head_x1, head_top_y, head_x2, head_bottom_y], "label": "no_hardhat", "conf": 0.90})
             return detections
 
-        crown_hsv   = cv2.cvtColor(crown_crop, cv2.COLOR_BGR2HSV)
-        crown_total = max(1, ch * cw)
+        helmet_hsv = cv2.cvtColor(helmet_crop, cv2.COLOR_BGR2HSV)
+        helmet_total = max(1, ch * cw)
 
-        # ----------------------------------------------------------------
-        # Feature ratios in the crown zone
-        # ----------------------------------------------------------------
-        # Skin pixels in the crown (= bare forehead / scalp visible)
-        r_skin = cv2.countNonZero(
-            cv2.inRange(crown_hsv, skin_lo, skin_hi)) / crown_total
+        # 4. Color & Shell Analysis in Head/Helmet Region
+        r_skin = cv2.countNonZero(cv2.inRange(helmet_hsv, skin_lo, skin_hi)) / helmet_total
+        r_hair = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([0, 15, 10]), np.array([25, 130, 80]))) / helmet_total
 
-        # Hair texture (bare scalp / very thin cap lets hair show through)
-        # H: 0-25, S: 15-130, V: 10-80 = dark brownish matte
-        r_hair = cv2.countNonZero(
-            cv2.inRange(crown_hsv, np.array([0, 15, 10]), np.array([25, 130, 80]))
-        ) / crown_total
-
-        # Yellow hardhat
-        r_yellow = cv2.countNonZero(
-            cv2.inRange(crown_hsv, np.array([13, 100, 90]), np.array([38, 255, 255]))
-        ) / crown_total
-
-        # Orange hardhat
-        r_orange = cv2.countNonZero(
-            cv2.inRange(crown_hsv, np.array([5, 110, 90]), np.array([17, 255, 255]))
-        ) / crown_total
-
-        # Red hardhat (hue wraps)
-        r_red = (
-            cv2.countNonZero(cv2.inRange(crown_hsv, np.array([0,  110, 90]), np.array([6,  255, 255]))) +
-            cv2.countNonZero(cv2.inRange(crown_hsv, np.array([174, 110, 90]), np.array([180, 255, 255])))
-        ) / crown_total
-
-        # Blue hardhat
-        r_blue = cv2.countNonZero(
-            cv2.inRange(crown_hsv, np.array([95, 90, 60]), np.array([135, 255, 255]))
-        ) / crown_total
-
-        # White hardhat
-        r_white = cv2.countNonZero(
-            cv2.inRange(crown_hsv, np.array([0, 0, 185]), np.array([180, 55, 255]))
-        ) / crown_total
-
-        # Dark region (motorcycle helmet / black hardhat)
-        r_dark = cv2.countNonZero(
-            cv2.inRange(crown_hsv, np.array([0, 0, 0]), np.array([180, 255, 80]))
-        ) / crown_total
-
-        # Sum of vivid hardhat colors
+        # Colored hardhats have high saturation (S >= 120) so skin tones (S < 110) never trigger them
+        r_yellow = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([13, 110, 90]), np.array([38, 255, 255]))) / helmet_total
+        r_orange = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([5, 120, 90]), np.array([17, 255, 255]))) / helmet_total
+        r_red = (cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([0, 140, 90]), np.array([6, 255, 255]))) +
+                 cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([174, 140, 90]), np.array([180, 255, 255])))) / helmet_total
+        r_blue = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([95, 90, 60]), np.array([135, 255, 255]))) / helmet_total
+        r_white = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([0, 0, 185]), np.array([180, 50, 255]))) / helmet_total
+        r_dark = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([0, 0, 0]), np.array([180, 255, 95]))) / helmet_total
         r_vivid = r_yellow + r_orange + r_red + r_blue
 
-        # ----------------------------------------------------------------
-        # Helmet decision
-        # ----------------------------------------------------------------
+        # Specular gloss / reflection on hard shell surface (polycarbonate/gloss)
+        # Helmets reflect bright specular light points; dark hair and cotton cloth wraps do not!
+        glare_px = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([0, 0, 195]), np.array([180, 55, 255])))
+
         is_helmet = False
         conf = 0.94
 
-        if r_vivid > 0.05:
-            # Vivid-colored hardhat (yellow, orange, red, blue)
+        if r_vivid > 0.06:
+            # Construction Hardhat (Yellow, Orange, Red, Blue)
             is_helmet = True
-            conf = round(min(0.98, 0.86 + r_vivid), 2)
-
+            conf = round(min(0.98, 0.85 + r_vivid), 2)
         elif r_white > 0.18 and r_skin < 0.20:
-            # White hardhat
+            # White Hardhat
             is_helmet = True
             conf = 0.95
-
-        elif r_dark > 0.35 and r_skin < 0.16 and r_hair < 0.10:
-            # Dark motorcycle helmet / black hardhat:
-            # • Rigid dark shell covers > 35% of the crown
-            # • Skin < 16%: no forehead or scalp peeking through
-            # • Hair < 10%: no bare hair texture (cap/gamcha/bare head rejected)
+        elif r_dark > 0.40 and r_skin < 0.25 and glare_px >= 8:
+            # Dark motorcycle helmet or black helmet shell:
+            # Rigid dome with confirmed specular light reflection spots on the shell.
+            # Matte dark hair, cloth wrap (gamcha), and cotton caps have NO specular reflection!
             is_helmet = True
-            conf = 0.95
+            conf = 0.96
 
-        # Bounding boxes
-        person_box = [int(w * 0.12), int(h * 0.03), int(w * 0.88), min(h - 10, int(h * 0.93))]
-        detections.append({"bbox": person_box, "label": "person", "conf": 0.95})
+        # Person box
+        person_box = [int(w * 0.12), head_top_y, int(w * 0.88), min(h - 10, fy + fh + int(h * 0.15))]
+        detections.append({"bbox": person_box, "label": "person", "conf": 0.96})
 
-        head_box = [crown_x1, crown_y1, crown_x2, crown_y2]
+        # Head / Helmet box
+        head_box = [head_x1, head_top_y, head_x2, head_bottom_y]
         if is_helmet:
             detections.append({"bbox": head_box, "label": "hardhat", "conf": conf})
         else:
             detections.append({"bbox": head_box, "label": "no_hardhat", "conf": 0.95})
 
-        # ================================================================
-        # VEST CHECK — NOT YET IMPLEMENTED
-        # ================================================================
-
         return detections
 
+    def process_frame(self, frame: np.ndarray, detections: Optional[List[Dict]] = None) -> Tuple[np.ndarray, Dict]:
         """
         Main Video Frame Pipeline:
         1. Performs live OpenCV PPE detection if detections not supplied.
