@@ -69,5 +69,20 @@ Visit **`http://localhost:8000`** in your browser.
 ## 🛠️ Features
 - **Upper-Body AI Detection:** High-speed scanning for Safety Helmets and Reflective Vests.
 - **2-Second Hold Timer:** Stabilizes detection when a worker steps in front of the camera before locking decisions.
-- **True Hardware Release on Halt:** The `⏹ HALT` button turns off the webcam sensor and pauses active software uptime.
+- **True Hardware Release on Halt:** Pauses the vision engine and powers off the webcam sensor.
 - **Zero-Wasted-Day Flow:** Automated gate lock and `🔁 Re-Scan` button after worker equips spare PPE.
+
+---
+
+## ⌨️ Operator Keyboard Shortcuts (Manual Override & Visitor Controls)
+
+The kiosk interface operates cleanly without on-screen buttons to prevent accidental or unauthorized worker tampering. System operators or supervisors can control gate states, clear non-worker visitors, or trigger manual overrides using discreet keyboard shortcuts:
+
+| Key | Alternative | Action | Use Case |
+| :---: | :---: | :--- | :--- |
+| **`C`** | **`2`** | **Force Clear (Green Pass)** | **Site Visitors & Exempt Personnel:** Instantly clears gate check-in for visitors, inspectors, clients, or office staff who do not require construction PPE, or manually overrides the gate if a sensor check requires bypass. |
+| **`M`** | **`1`** | **Force Missing (Red Flag)** | Flags missing PPE, unlocks visual guidance pamphlet, and triggers regional audio alert directing the person to Spare Bin A. |
+| **`R`** | — | **Re-Scan Current Worker** | Unlocks the scanner to re-evaluate the worker after they put on spare PPE. |
+| **`N`** | — | **Next Worker** | Increments the worker ID counter and resets the gate for the next person in line. |
+| **`H`** | — | **Halt / Resume** | Pauses the kiosk system and releases webcam hardware (powers off camera sensor). Pressing again immediately resumes scanning. |
+
