@@ -238,28 +238,34 @@ class VisionEngine:
         r_dark = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([0, 0, 0]), np.array([180, 255, 105]))) / helmet_total
         r_vivid = r_yellow + r_orange + r_red + r_blue
 
-        # Specular gloss / reflection highlights on rigid shell (polycarbonate/fiberglass):
-        # A rigid helmet reflects bright room/lamp spots. Matte cotton caps and dark hair do NOT reflect specular spots.
+        # Specular gloss / reflection highlights on rigid shell (polycarbonate/fiberglass/ABS):
+        # A rigid helmet reflects bright room/lamp specular spots (glare_px >= 12).
+        # Matte cotton caps, baseball caps, scarves, and hair have NO specular reflection (glare_px == 0).
         glare_px = cv2.countNonZero(cv2.inRange(helmet_hsv, np.array([0, 0, 190]), np.array([180, 60, 255])))
 
         # Decision Logic:
         is_helmet = False
         conf = 0.94
 
-        if r_vivid > 0.05:
-            # Construction Hardhat (Yellow, Orange, Red, Blue)
+        if r_vivid >= 0.25:
+            # Solid Construction Hardhat (Yellow, Orange, Red, Blue spanning the dome)
+            # Note: A small letter/logo on a cap only covers 5-13% of the head crop, so it is strictly rejected.
             is_helmet = True
             conf = round(min(0.98, 0.85 + r_vivid), 2)
-        elif r_white > 0.18 and r_skin < 0.20:
-            # White Hardhat (bright non-skin dome)
+        elif r_white > 0.20 and r_skin < 0.20:
+            # White Construction Hardhat (dominant bright non-skin dome)
             is_helmet = True
             conf = 0.95
-        elif (r_dark > 0.35 and r_skin < 0.22 and glare_px >= 8):
+        elif (r_dark > 0.40 and r_skin < 0.22 and glare_px >= 12):
             # Dark motorcycle helmet or black PPE helmet:
             # Rigid dome with confirmed specular reflection spots on the shell.
             # Matte dark hair, cotton cloth wraps (gamcha), and baseball caps have NO specular reflection!
             is_helmet = True
             conf = 0.96
+        elif (glare_px >= 15 and r_skin < 0.20 and (r_dark > 0.30 or r_vivid > 0.04)):
+            # Glossy motorcycle helmet or tinted shell (any color with rigid specular sheen)
+            is_helmet = True
+            conf = 0.95
 
         # Person bounding box
         person_box = [int(w * 0.12), head_top_y, int(w * 0.88), min(h - 10, fy + fh + int(h * 0.15))]
