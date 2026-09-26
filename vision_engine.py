@@ -256,14 +256,18 @@ class VisionEngine:
             # White Construction Hardhat (dominant bright non-skin dome)
             is_helmet = True
             conf = 0.95
-        elif (r_dark > 0.40 and r_skin < 0.22 and glare_px >= 12):
-            # Dark motorcycle helmet or black PPE helmet:
-            # Rigid dome with confirmed specular reflection spots on the shell.
-            # Matte dark hair, cotton cloth wraps (gamcha), and baseball caps have NO specular reflection!
+        elif (r_dark >= 0.60 and r_skin < 0.10):
+            # Solid Dark / Black Helmet (Motorcycle helmet, black PPE helmet):
+            # A full rigid helmet dome covers the upper head and forehead down to brow level (dark >= 60%, skin < 10%).
+            # Baseball caps, cloth wraps, and bare heads expose significant forehead skin/hair texture (dark < 40% or skin > 15%).
+            is_helmet = True
+            conf = 0.97
+        elif (r_dark > 0.40 and r_skin < 0.22 and glare_px >= 10):
+            # Glossy motorcycle helmet or black helmet shell with specular highlight points
             is_helmet = True
             conf = 0.96
         elif (glare_px >= 15 and r_skin < 0.20 and (r_dark > 0.30 or r_vivid > 0.04)):
-            # Glossy motorcycle helmet or tinted shell (any color with rigid specular sheen)
+            # Glossy colored motorcycle helmet or tinted shell (any color with rigid specular sheen)
             is_helmet = True
             conf = 0.95
 
