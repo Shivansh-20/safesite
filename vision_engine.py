@@ -173,9 +173,11 @@ class VisionEngine:
 
         num_labels, labels, stats, centroids = cv2.connectedComponentsWithStats(skin_clean)
         best_face = None
-        max_area = 0
+        best_score = 0
+        mid_x = w / 2.0
 
         # Find the primary face skin cluster in central viewing area
+        # Center-weighted scoring ensures hands/arms raised to the side are never mistaken for the face
         for i in range(1, num_labels):
             area = stats[i, cv2.CC_STAT_AREA]
             x = stats[i, cv2.CC_STAT_LEFT]
@@ -185,10 +187,14 @@ class VisionEngine:
             cx = centroids[i][0]
             cy = centroids[i][1]
 
-            # Face blob should be large enough, centered horizontally, and in the middle-upper frame
+            # Face blob should be large enough, horizontally aligned with kiosk, and in upper-middle frame
             if area > 1800 and (w * 0.18) < cx < (w * 0.82) and y > int(h * 0.10):
-                if area > max_area:
-                    max_area = area
+                # Weight by proximity to camera horizontal center:
+                # The worker's head is centered in front of the kiosk; hands/arms are peripheral
+                dx = abs(cx - mid_x)
+                score = area / (1.0 + (dx / (w * 0.16))**2)
+                if score > best_score:
+                    best_score = score
                     best_face = (x, y, bw, bh, cx, cy)
 
         # If no face is found (empty wall, camera pointed away, dark, hands covering),
